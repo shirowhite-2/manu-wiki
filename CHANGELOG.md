@@ -1,5 +1,21 @@
 # 变更记录
 
+## v0.2.0 — 2026-11-16
+
+- 建立管理、编辑者、审核人、读者四类组和空间级权限矩阵。
+- 新增 `Knowledge` 主分类空间、`Knowledge.DocumentLibrary` 和分类首页。
+- 新增 `LuxPedia.Code.ArticleClass`、`CategoryClass` 元数据类，以及文章模板。
+- 新增图片、视频、Chart.js 图表、目录和历史回滚示例。
+- 默认编辑器切换为 CKEditor，并为有编辑权限的用户增加“源码编辑”入口。
+- 全局拒绝匿名编辑/评论/删除/注册，修复未登录可进入创建页面的问题。
+- 新增分类说明和分类索引页面。
+- 新增 BOP-ACTIVE、BOP-PASSIVE 主分类；分类索引改为自动发现新分类。
+- 新增管理员分类管理页（Knowledge.CategoryAdmin，仅管理员）和 `scripts/wiki_admin.py` 命令行（新增分类、管理员、普通账号）。
+- 安装 CKEditor、Chart.js、Embed、Favorites、Publication Workflow。
+- 新增 `scripts/apply_sprint1.py` 幂等初始化脚本和 `tests/sprint1_smoke.py`。
+- 已验证：匿名拒绝、读者/编辑者/审核人权限、源码编辑、媒体渲染、附件字节、历史回滚。
+- 未实现：审批 UI、文件引用/删除保护、统一审计、Draw.io、Excel 在线编辑。
+
 ## v0.1.1 — 2026-11-12
 
 - 用户品牌统一为 LuxPedia：页头 Logo、favicon、浏览器标题、首页、页脚及站内帮助。

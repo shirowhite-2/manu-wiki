@@ -1,6 +1,8 @@
 # 阶段报告与问题清单
 
-更新日期：2026-11-12。以实际验收记录为准。
+更新日期：2026-11-16。以实际验收记录为准。
+
+Sprint 1（2026-11-16）：已建立 `XWiki.LuxManagers`、`LuxEditors`、`LuxReviewers`、`LuxReaders` 四类角色，Knowledge 主分类空间、ArticleClass/CategoryClass、分类首页、文档库和示例文章；安装 CKEditor、Chart.js、Embed、Favorites、Publication Workflow。已验证权限矩阵、源码编辑、图片/视频/图表渲染、附件字节、历史与回滚，`tests/sprint1_smoke.py` 14 项通过。审批 UI、文件引用/删除保护、统一审计、Draw.io 和 Excel 在线编辑仍未实现。详见 [Sprint 1](../docs/sprint1.md)。本地验证使用 127.0.0.1:8081，因宿主 8080 被其他容器占用；默认部署仍为 8080。
 
 品牌更新：用户选择 LuxPedia，已应用独立主题、Logo/图标、站内帮助及首页文案，清理普通导航推广入口。品牌与权限复验见[品牌验收](branding-acceptance.md)，组件与阶段范围不变。
 

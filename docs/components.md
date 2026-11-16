@@ -1,6 +1,6 @@
 # 组件、版本、许可证和费用
 
-核对日期：2026-11-12。软件费用与实际模型调用/服务器费用分开；本次没有采购、订阅或付费试用。准确运行状态见 `reports/acceptance.md`。
+核对日期：2026-11-16。软件费用与实际模型调用/服务器费用分开；本次没有采购、订阅或付费试用。准确运行状态见 `reports/acceptance.md`。
 
 | 组件 | 固定/核对版本 | 许可与费用 | 状态 |
 | --- | --- | --- | --- |
@@ -13,6 +13,9 @@
 | LibreOffice（镜像内） | 26.2.7（Dockerfile声明） | MPL2.0/LGPLv3+及第三方许可，免费 | 用于转换/预览，不等于在线编辑服务 |
 | LLM Application / Index | 1.0.0 | LGPL2.1+，免费 | 安装与实测状态见报告 |
 | Publication Workflow | 2.4.9 | 发布POM/源码头LGPL2.1+；README写LGPLv3，差异见workflow.md | 安装与实测状态见报告 |
+| Chart.js Integration | 1.6.3 | 许可与依赖待对外分发前复核 | 已安装，图表示例渲染通过 |
+| Embed macro | 1.1.3 | LGPL 2.1+ | 已安装，MP4 正文内嵌通过 |
+| Favorites Application | 1.4.4 | LGPL 2.1 | 已安装，未做浏览器收藏流程验收 |
 | 模型服务 | 未提供端点/模型ID | 既有服务可能另有API费用和模型许可 | 未调用、未部署 |
 | ONLYOFFICE Docs Community | 候选，未锁定运行版本 | AGPLv3及附加条款；免费社区发行 | 未部署 |
 | Collabora CODE | 候选，调研26.04.2.4限制说明 | 主要MPL2.0及第三方许可；免费开发版 | 未部署 |
