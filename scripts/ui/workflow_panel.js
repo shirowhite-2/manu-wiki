@@ -47,7 +47,7 @@
         summary = document.createElement('section');
         summary.className = 'luxpedia-workflow-summary';
         summary.setAttribute('aria-live', 'polite');
-        summary.innerHTML = '<strong class="luxpedia-state"></strong><ol class="luxpedia-steps">' +
+        summary.innerHTML = '<strong class="luxpedia-state label label-default"></strong><ol class="luxpedia-steps">' +
           '<li></li><li></li><li></li></ol><p class="luxpedia-next"></p>' +
           '<dl><dt></dt><dd></dd></dl><a class="luxpedia-review-queue" href="/bin/view/LuxPedia/Workflow/ReviewQueue"></a>';
         panel.insertBefore(summary, panel.firstChild);
@@ -65,6 +65,8 @@
       ['stepDraft', 'stepReview', 'stepPublish'].forEach(function (key, index) {
         text(steps[index], t(key));
         var current = state === 'published' ? 2 : ['validating', 'moderating', 'valid'].includes(state) ? 1 : 0;
+        steps[index].classList.toggle('text-primary', index === current);
+        steps[index].classList.toggle('text-muted', index !== current);
         if (index === current) { steps[index].setAttribute('aria-current', 'step'); }
         else { steps[index].removeAttribute('aria-current'); }
       });
@@ -96,15 +98,13 @@
     if (!document.getElementById('luxpedia-workflow-style')) {
       var style = document.createElement('style');
       style.id = 'luxpedia-workflow-style';
-      style.textContent = '.luxpedia-workflow-summary{padding:4px 0 14px;line-height:1.55}' +
-        '.luxpedia-state{display:inline-block;padding:4px 10px;border-radius:20px;background:#e9f1ff;color:#183f78}' +
-        '.luxpedia-steps{display:flex;gap:6px;list-style:none;padding:0;margin:16px 0;font-size:12px}' +
-        '.luxpedia-steps li{flex:1;border-bottom:3px solid #dfe4eb;padding-bottom:7px;color:#64748b}' +
-        '.luxpedia-steps [aria-current]{border-color:#2563eb;color:#183f78;font-weight:bold}' +
-        '.luxpedia-workflow-summary dt{font-size:12px;color:#64748b}.luxpedia-workflow-summary dd{overflow-wrap:anywhere;margin:4px 0 12px}' +
+      // Layout only. Colors, typography, labels and buttons belong to the host theme.
+      style.textContent = '.luxpedia-workflow-summary{padding-bottom:1em}' +
+        '.luxpedia-steps{display:flex;flex-wrap:wrap;gap:.5em;list-style:none;padding:0;margin:1em 0}' +
+        '.luxpedia-steps li{flex:1}.luxpedia-steps [aria-current]{font-weight:bold}' +
+        '.luxpedia-workflow-summary dd{overflow-wrap:anywhere;margin:0 0 1em}' +
         '.publicationworkflow-info .buttonwrapper{margin:8px 0}.publicationworkflow-info [hidden],.publicationworkflow-information [hidden]{display:none!important}';
-      style.textContent += '.publicationworkflow-info .xformInline{display:block}.publicationworkflow-info input[type=submit]{max-width:100%;white-space:normal;padding:7px 10px;border:1px solid #cbd5e1;border-radius:5px}' +
-        '.publicationworkflow-info input.btn-primary{background:#2563eb;color:white;border-color:#2563eb}.luxpedia-workflow-extra{margin:12px 0;color:#475569}';
+      style.textContent += '.publicationworkflow-info .xformInline{display:block}.luxpedia-workflow-extra{margin:1em 0}';
       document.head.appendChild(style);
     }
   }

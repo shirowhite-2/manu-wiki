@@ -17,27 +17,30 @@
   }
   function install() {
     if (document.getElementById('luxpedia-language')) { return; }
-    var container = document.createElement('div');
+    var navigation = document.querySelector('#menuview .navbar-right, #headerglobal .navbar-right');
+    var header = document.querySelector('#headerglobal, #header');
+    var container = document.createElement(navigation && navigation.tagName === 'UL' ? 'li' : 'div');
     container.id = 'luxpedia-language';
-    container.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px 16px;justify-content:flex-end;font-size:13px;';
+    container.className = navigation ? 'navbar-form' : 'form-inline text-right';
     var label = document.createElement('label');
     label.htmlFor = 'luxpedia-language-select';
+    label.className = 'control-label';
     label.dataset.luxpediaI18n = 'language';
     var select = document.createElement('select');
     select.id = 'luxpedia-language-select';
-    select.className = 'form-control';
+    select.className = 'form-control input-sm';
     select.style.cssText = 'width:auto;display:inline-block;';
     [['en', 'English'], ['zh', '中文']].forEach(function (item) {
       var option = document.createElement('option');
       option.value = item[0]; option.textContent = item[1]; select.appendChild(option);
     });
     select.value = language;
-    container.appendChild(label); container.appendChild(select);
+    container.appendChild(label); container.appendChild(document.createTextNode(' ')); container.appendChild(select);
     var notice = document.createElement('span');
     notice.setAttribute('role', 'status');
     container.appendChild(notice);
-    var header = document.querySelector('#headerglobal, #header');
-    if (header) { header.appendChild(container); }
+    if (navigation) { navigation.appendChild(container); }
+    else if (header) { header.appendChild(container); }
     else { document.body.insertBefore(container, document.body.firstChild); }
     select.addEventListener('change', function () {
       language = select.value;

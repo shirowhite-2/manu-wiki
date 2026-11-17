@@ -52,7 +52,9 @@ async function wikiFixture(options = {}) {
     const workflow = !state.status ? start : state.status === 'draft' ? form('submitformoderation') :
       state.status === 'validating' ? form('publish') + form('validate') + form('refusevalidation') + form('archive') :
       state.status === 'published' ? form('getEditableDraft') + form('archive') + form('unpublish') : '';
-    return `<!doctype html><meta name="document" content="${reference}">
+    return `<!doctype html><title>Local workflow test fixture — production theme not loaded</title><meta name="document" content="${reference}">
+      ${options.navbar ? '<header id="headerglobal"><nav id="menuview"><ul class="navbar-right"><li id="original-menu">Original menu</li></ul></nav></header>' : ''}
+      <p role="note">Local test fixture. The production LuxPedia theme is not loaded.</p>
       <div data-xwiki-form-token="test-token"></div>
       <a id="tmUser" href="/bin/view/XWiki/${options.admin ? 'Admin' : 'editor'}">Profile</a>
       <div id="document-title"><h1>New article</h1></div>
@@ -309,5 +311,23 @@ test('reviewer cannot see author or administrator workflow actions', async () =>
     for (const action of ['getEditableDraft', 'archive', 'unpublish']) {
       assert.equal(await wiki.page.locator('form:has(input[value="' + action + '"])').isVisible(), false);
     }
+  } finally { await wiki.context.close(); }
+});
+
+test('workflow controls inherit the host theme palette', async () => {
+  const wiki = await wikiFixture({ status: 'validating', linkedTarget: 'Knowledge.Technical.Article', role: 'reviewer', navbar: true });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/view/Drafts/NewArticle/WebHome');
+    await wiki.page.waitForFunction(() => document.querySelector('.luxpedia-state')?.textContent === 'Awaiting review');
+    await wiki.page.addStyleTag({ content: '.btn-primary{background-color:rgb(126,34,206);color:rgb(255,255,255)}' +
+      '.label-default{background-color:rgb(22,101,52);color:rgb(255,255,255)}.text-primary{color:rgb(126,34,206)}' });
+    assert.equal(await wiki.page.locator('form:has(input[value="publish"]) input[type="submit"]').evaluate(
+      node => getComputedStyle(node).backgroundColor), 'rgb(126, 34, 206)');
+    assert.equal(await wiki.page.locator('.luxpedia-state').evaluate(
+      node => getComputedStyle(node).backgroundColor), 'rgb(22, 101, 52)');
+    assert.equal(await wiki.page.locator('.luxpedia-steps [aria-current]').evaluate(
+      node => getComputedStyle(node).color), 'rgb(126, 34, 206)');
+    assert.equal(await wiki.page.locator('#menuview .navbar-right > li#luxpedia-language').count(), 1);
+    assert.equal(await wiki.page.locator('#original-menu').textContent(), 'Original menu');
   } finally { await wiki.context.close(); }
 });
