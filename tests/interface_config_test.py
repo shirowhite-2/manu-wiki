@@ -140,6 +140,18 @@ class InterfaceConfigTest(unittest.TestCase):
         self.assertIn('custom.key=preserved', content)
         self.assertIn('workflow.title=Publication', content)
 
+    def test_draft_list_is_a_standalone_block_in_both_languages(self):
+        wiki = FakeWiki()
+        interface.apply(Module, wiki)
+        english = wiki.pages[('Drafts', 'WebHome')][1]
+        translations = [ET.fromstring(data).findtext('{http://www.xwiki.org}content')
+                        for method, path, data in wiki.requests
+                        if method == 'PUT' and path.endswith('/Drafts/pages/WebHome/translations/zh')]
+        self.assertEqual(len(translations), 1)
+        for content in [english, *translations]:
+            self.assertIn('{{/velocity}}\n\n{{documents ', content)
+            self.assertEqual(content.count('{{documents '), 1)
+
     def test_security_setup_stops_when_component_is_missing(self):
         wiki = FakeWiki(policy=False)
         with self.assertRaisesRegex(RuntimeError, 'Install or update workflow-policy'):
