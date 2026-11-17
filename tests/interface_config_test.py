@@ -124,6 +124,14 @@ class InterfaceConfigTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'invalid form token'):
             security.verify_response(200, b'POLICY_BAD_TOKEN', 'AUDIT_CLASS_READY', 'PolicySetup')
 
+    def test_http_200_reports_final_java_cause_without_token_or_stack(self):
+        body = b'<p>Failed to execute velocity</p> Caused by: java.lang.RuntimeException: wrapper\nCaused by: java.lang.IllegalArgumentException: bad token secret-token\n at org.example.Setup.run(Setup.java:1)'
+        with self.assertRaises(RuntimeError) as raised:
+            security.verify_response(200, body, 'AUDIT_CLASS_READY', 'PolicySetup', redactions=('secret-token',))
+        self.assertIn('IllegalArgumentException: bad token [redacted]', str(raised.exception))
+        self.assertNotIn('secret-token', str(raised.exception))
+        self.assertNotIn('Setup.java', str(raised.exception))
+
     def test_translation_error_is_reported(self):
         wiki = FakeWiki()
         wiki.request = lambda *args, **kwargs: (403, b'forbidden')

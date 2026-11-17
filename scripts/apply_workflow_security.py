@@ -3,6 +3,7 @@
 import argparse
 import importlib.util
 import os
+import re
 import urllib.parse
 from html.parser import HTMLParser
 from pathlib import Path
@@ -16,7 +17,7 @@ POLICY_SERVICE_MISSING
 #end
 {{/velocity}}'''
 SETUP = '''{{velocity}}
-$services.luxpediaWorkflowPolicy.initialize($request.form_token)
+$services.luxpediaWorkflowPolicy.initialize($request.getParameter('form_token'))
 {{/velocity}}'''
 
 
@@ -35,7 +36,7 @@ def response_text(body):
     return ''.join(parsed.parts).strip()
 
 
-def verify_response(status, body, expected, page):
+def verify_response(status, body, expected, page, redactions=()):
     text = response_text(body)
     if status == 200 and text == expected:
         return
@@ -49,7 +50,15 @@ def verify_response(status, body, expected, page):
         raise RuntimeError('Workflow initialization rejected an invalid form token. Run the installer again to fetch a fresh token.')
     if text == 'POLICY_POST_REQUIRED':
         raise RuntimeError('Workflow initialization requires an authenticated POST request.')
-    raise RuntimeError(f'Could not verify {page} (HTTP {status}). Deployment stopped; inspect the protected diagnostic page and XWiki logs.')
+    # XWiki can render a Velocity/Java exception while keeping HTTP 200. Surface
+    # its final cause rather than asking users to copy an entire HTML stack trace.
+    detail = text.rsplit('Caused by:', 1)[-1] if 'Caused by:' in text else text
+    for secret in redactions:
+        if secret:
+            detail = detail.replace(secret, '[redacted]')
+    detail = re.split(r'\s+at\s+(?:[\w$]+\.)+[\w$]+\(', detail, maxsplit=1)[0]
+    detail = ' '.join(detail.split())[:800] or 'Empty diagnostic response'
+    raise RuntimeError(f'Could not verify {page} (HTTP {status}): {detail}')
 
 
 def load_module():
@@ -72,10 +81,11 @@ def apply(module, wiki):
     wiki.ensure_page("LuxPedia/Workflow", "PolicySetup", "Workflow policy setup", SETUP, hidden=True, update=True)
     wiki.ensure_object_values("LuxPedia/Workflow", "PolicySetup", "XWiki.XWikiRights", {
         "groups": "XWiki.LuxManagers,XWiki.XWikiAdminGroup", "levels": "view", "allow": "1"})
+    token = wiki.form_token()
     status, body = wiki.request("POST", "/bin/get/LuxPedia/Workflow/PolicySetup?outputSyntax=plain",
-                                urllib.parse.urlencode({'form_token': wiki.form_token()}),
+                                urllib.parse.urlencode({'form_token': token}),
                                 'application/x-www-form-urlencoded')
-    verify_response(status, body, 'AUDIT_CLASS_READY', 'PolicySetup')
+    verify_response(status, body, 'AUDIT_CLASS_READY', 'PolicySetup', redactions=(token,))
     for group in ("XWiki.LuxEditors", "XWiki.LuxReviewers", "XWiki.LuxReaders"):
         wiki.ensure_right("XWiki", "XWikiPreferences", {
             "groups": group, "levels": "script,programming", "allow": "0"})
