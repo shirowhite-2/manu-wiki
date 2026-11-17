@@ -16,6 +16,8 @@ class FakeWiki:
     def __init__(self, policy=True):
         self.policy = policy
         self.pages = {}
+        self.existing_pages = {('XWiki', 'XWikiPreferences')}
+        self.object_values = {}
         self.objects_written = []
         self.rights = []
         self.requests = []
@@ -25,13 +27,22 @@ class FakeWiki:
         return '/rest/wikis/xwiki/spaces/' + space.replace('/', '/spaces/') + '/pages/' + page
 
     def ensure_page(self, space, page, title, content, **kwargs):
+        if self.page_exists(space, page) and not kwargs.get('update', False):
+            return False
         self.pages[(space, page)] = (title, content)
+        return True
 
     def page_exists(self, space, page):
-        return (space, page) in self.pages
+        return (space, page) in self.pages or (space, page) in self.existing_pages
+
+    def has_object(self, space, page, class_name):
+        return (space, page, class_name) in self.object_values
 
     def ensure_object_values(self, space, page, class_name, values):
+        if not self.page_exists(space, page):
+            raise RuntimeError(f'Object parent page missing (HTTP 404): {space}.{page}')
         self.objects_written.append((space, page, class_name, values))
+        self.object_values.setdefault((space, page, class_name), {}).update(values)
 
     def ensure_right(self, space, page, values):
         self.rights.append((space, page, values))
@@ -75,12 +86,52 @@ class InterfaceConfigTest(unittest.TestCase):
         wiki = FakeWiki()
         interface.apply(Module, wiki)
         allowed = set(interface.PAGES) | {('PublicationWorkflow', 'Translations'), ('Knowledge', 'CategoryAdmin'),
-            ('LuxPedia/Code', 'CategoryHomeTemplate'), ('LuxPedia/Code', 'InterfaceTranslations')}
+            ('LuxPedia/Code', 'CategoryHomeTemplate'), ('LuxPedia/Code', 'InterfaceTranslations'),
+            ('LuxPedia', 'HelpPanel'), ('LuxPedia/Code', 'SourceEditUIX'), ('LuxPedia/Code', 'EditGuideUIX')}
         self.assertLessEqual(wiki.pages.keys(), allowed)
         puts = [path for method, path, data in wiki.requests if method == 'PUT']
         self.assertTrue(puts)
         self.assertTrue(all(path.endswith('/translations/zh') for path in puts))
         self.assertEqual(wiki.pages[('Main', 'WebHome')][0], 'LuxPedia knowledge base')
+
+    def test_missing_optional_panel_and_menus_are_created_with_complete_registration(self):
+        wiki = FakeWiki()
+        interface.apply(Module, wiki)
+        panel = wiki.object_values[('LuxPedia', 'HelpPanel', 'Panels.PanelClass')]
+        self.assertIn('LuxPedia.Help.WebHome', panel['content'])
+        for page, name, order in [('SourceEditUIX', 'luxpedia.source.edit', 15000),
+                                  ('EditGuideUIX', 'luxpedia.edit.guide', 15001)]:
+            menu = wiki.object_values[('LuxPedia/Code', page, 'XWiki.UIExtensionClass')]
+            self.assertEqual(menu['extensionPointId'], 'org.xwiki.plaftorm.menu.content')
+            self.assertEqual(menu['name'], name)
+            self.assertEqual(menu['scope'], 'wiki')
+            self.assertEqual(menu['parameters'], f'order={order}')
+            self.assertIn('$services.localization.render', menu['content'])
+
+    def test_existing_panel_documents_and_menu_registration_are_preserved(self):
+        wiki = FakeWiki()
+        existing = {('LuxPedia', 'HelpPanel'): ('Custom panel', 'Existing panel body'),
+                    ('LuxPedia/Code', 'SourceEditUIX'): ('Custom menu', 'Existing menu body')}
+        wiki.pages.update(existing)
+        menu_key = ('LuxPedia/Code', 'SourceEditUIX', 'XWiki.UIExtensionClass')
+        registration = {'name': 'custom.source.menu', 'parameters': 'order=123',
+                        'scope': 'wiki', 'extensionPointId': 'custom.menu.point'}
+        wiki.object_values[menu_key] = dict(registration, content='Old localized label')
+        interface.apply(Module, wiki)
+        for key, value in existing.items():
+            self.assertEqual(wiki.pages[key], value)
+        for key, value in registration.items():
+            self.assertEqual(wiki.object_values[menu_key][key], value)
+        self.assertIn("luxpedia.sourceEdit", wiki.object_values[menu_key]['content'])
+
+    def test_optional_panel_and_menu_setup_can_be_repeated(self):
+        wiki = FakeWiki()
+        interface.apply(Module, wiki)
+        pages = dict(wiki.pages)
+        objects = {key: dict(values) for key, values in wiki.object_values.items()}
+        interface.apply(Module, wiki)
+        self.assertEqual(wiki.pages, pages)
+        self.assertEqual(wiki.object_values, objects)
 
     def test_native_translation_keeps_unrelated_keys(self):
         wiki = FakeWiki()

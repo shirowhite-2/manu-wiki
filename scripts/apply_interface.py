@@ -157,6 +157,9 @@ def apply(module, wiki):
     category_template = V + ARTICLE_LIST.replace("(doc.space = 'Knowledge' or doc.space like 'Knowledge.%')", "doc.space = '$catSpace'")
     category_template = category_template.replace('#set($articles', "#set($catSpace = $doc.fullName.replace('.WebHome', ''))\n#set($articles", 1) + END
     wiki.ensure_page('LuxPedia/Code', 'CategoryHomeTemplate', 'Category article list', category_template, hidden=True, update=True)
+    # Branding is optional: object creation requires an existing parent page.
+    # Keep an existing panel document intact and localize only its panel object.
+    wiki.ensure_page('LuxPedia', 'HelpPanel', 'LuxPedia help', '', hidden=True)
     wiki.ensure_object_values('LuxPedia', 'HelpPanel', 'Panels.PanelClass', {
         'name': 'LuxPedia help', 'type': 'view', 'category': 'Information',
         'content': V + '#panelheader("LuxPedia")\n* [[#lp(\'help\')>>LuxPedia.Help.WebHome]]\n* [[#lp(\'about\')>>LuxPedia.About.WebHome]]\n#panelfooter()' + END,
@@ -173,14 +176,22 @@ def apply(module, wiki):
             wiki.ensure_page('LuxPedia/Templates', 'Article', 'Article template',
                              content[len(module.ARTICLE_META):], hidden=True, update=True)
     # These menu extensions render on every page and use XWiki's selected locale.
-    for page, old, key in [('SourceEditUIX', '源码编辑', 'sourceEdit'), ('EditGuideUIX', '编辑指南', 'editGuide')]:
+    for page, old, key, name, order in [
+            ('SourceEditUIX', '源码编辑', 'sourceEdit', 'luxpedia.source.edit', 15000),
+            ('EditGuideUIX', '编辑指南', 'editGuide', 'luxpedia.edit.guide', 15001)]:
         template = module.SOURCE_EDIT_UIX if page == 'SourceEditUIX' else None
         if template is None:
             spec = importlib.util.spec_from_file_location('apply_help', ROOT / 'scripts/apply_help.py')
             help_module = importlib.util.module_from_spec(spec); spec.loader.exec_module(help_module)
             template = help_module.MENU_CONTENT
         content = template.replace(old, "$services.localization.render('luxpedia." + key + "')")
-        wiki.ensure_object_values('LuxPedia/Code', page, 'XWiki.UIExtensionClass', {'content': content})
+        wiki.ensure_page('LuxPedia/Code', page, 'LuxPedia menu extension',
+                         'Localized content menu UI extension.', hidden=True)
+        properties = {'content': content}
+        if not wiki.has_object('LuxPedia/Code', page, 'XWiki.UIExtensionClass'):
+            properties.update({'extensionPointId': 'org.xwiki.plaftorm.menu.content',
+                               'name': name, 'scope': 'wiki', 'parameters': f'order={order}'})
+        wiki.ensure_object_values('LuxPedia/Code', page, 'XWiki.UIExtensionClass', properties)
     module.log('English and Chinese interface pages installed; article content and category names preserved')
 
 
