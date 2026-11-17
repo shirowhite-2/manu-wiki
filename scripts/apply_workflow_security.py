@@ -3,17 +3,53 @@
 import argparse
 import importlib.util
 import os
+import urllib.parse
+from html.parser import HTMLParser
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-HEALTH = '''{{groovy}}
-import com.xpn.xwiki.web.Utils
-import org.xwiki.observation.EventListener
-if (!xwiki.hasAdminRights()) { println("FORBIDDEN"); return }
-try {
-  println(Utils.getComponent(EventListener.class, "luxpedia-workflow-policy").getPolicyVersion())
-} catch (Exception error) { println("POLICY_NOT_INSTALLED") }
-{{/groovy}}'''
+HEALTH = '''{{velocity}}
+#if($services.luxpediaWorkflowPolicy)
+$services.luxpediaWorkflowPolicy.status()
+#else
+POLICY_SERVICE_MISSING
+#end
+{{/velocity}}'''
+SETUP = '''{{velocity}}
+$services.luxpediaWorkflowPolicy.initialize($request.form_token)
+{{/velocity}}'''
+
+
+class DiagnosticText(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.parts = []
+
+    def handle_data(self, data):
+        self.parts.append(data)
+
+
+def response_text(body):
+    parsed = DiagnosticText()
+    parsed.feed(body.decode('utf-8', errors='replace'))
+    return ''.join(parsed.parts).strip()
+
+
+def verify_response(status, body, expected, page):
+    text = response_text(body)
+    if status == 200 and text == expected:
+        return
+    if status in (401, 403) or text == 'POLICY_FORBIDDEN':
+        raise RuntimeError('Deployment requires a wiki-level administrator. Check the account in .secrets/admin_username.')
+    if 'not allowed' in text.lower() and ('groovy' in text.lower() or 'velocity' in text.lower()):
+        raise RuntimeError('The diagnostic page author cannot execute its script. Update this branch and use a wiki administrator with script rights; programming/Groovy rights are not required by the updated installer.')
+    if text in ('POLICY_SERVICE_MISSING', 'POLICY_NOT_INSTALLED'):
+        raise RuntimeError('Install or update workflow-policy-1.0.0.jar: rebuild the JAR and Docker image, then recreate the XWiki container. The administrator bootstrap service was not found.')
+    if text == 'POLICY_BAD_TOKEN':
+        raise RuntimeError('Workflow initialization rejected an invalid form token. Run the installer again to fetch a fresh token.')
+    if text == 'POLICY_POST_REQUIRED':
+        raise RuntimeError('Workflow initialization requires an authenticated POST request.')
+    raise RuntimeError(f'Could not verify {page} (HTTP {status}). Deployment stopped; inspect the protected diagnostic page and XWiki logs.')
 
 
 def load_module():
@@ -30,31 +66,16 @@ def apply(module, wiki):
     wiki.ensure_object_values("LuxPedia/Workflow", "PolicyStatus", "XWiki.XWikiRights", {
         "groups": "XWiki.LuxManagers,XWiki.XWikiAdminGroup", "levels": "view", "allow": "1"})
     status, body = wiki.request("GET", "/bin/get/LuxPedia/Workflow/PolicyStatus?outputSyntax=plain")
-    if status != 200 or body.strip() != b"luxpedia-workflow-policy-1":
-        raise RuntimeError("Install workflow-policy-1.0.0.jar and restart XWiki first. "
-                           "The status page must be authored by an administrator with programming rights.")
+    verify_response(status, body, 'luxpedia-workflow-policy-1', 'PolicyStatus')
     module.log("server workflow policy is active")
     wiki.ensure_page("LuxPedia/Code", "ReviewAuditClass", "Review submission audit", "Server-managed submission audit.", hidden=True)
-    # Use XWiki's existing class bootstrap mechanism, run only by the administrator.
-    class_setup = '''{{groovy}}
-if (!xwiki.hasAdminRights()) { println("FORBIDDEN"); return }
-def d = xwiki.getDocument("LuxPedia.Code.ReviewAuditClass")
-def c = d.getDocument().getXClass()
-def changed = false
-if (c.get("submittedBy") == null) { c.addTextField("submittedBy", "Submitted by", 60); changed = true }
-if (c.get("authoredBy") == null) { c.addTextField("authoredBy", "Content authored by", 60); changed = true }
-if (c.get("submittedVersion") == null) { c.addTextField("submittedVersion", "Submitted version", 30); changed = true }
-if (changed) d.save("Ensure review audit fields")
-def listener = com.xpn.xwiki.web.Utils.getComponent(org.xwiki.observation.EventListener.class, "luxpedia-workflow-policy")
-println("Draft permissions normalized: " + listener.repairExistingDraftRights(xcontext.getContext()))
-println("AUDIT_CLASS_READY")
-{{/groovy}}'''
-    wiki.ensure_page("LuxPedia/Workflow", "PolicySetup", "Workflow policy setup", class_setup, hidden=True, update=True)
+    wiki.ensure_page("LuxPedia/Workflow", "PolicySetup", "Workflow policy setup", SETUP, hidden=True, update=True)
     wiki.ensure_object_values("LuxPedia/Workflow", "PolicySetup", "XWiki.XWikiRights", {
         "groups": "XWiki.LuxManagers,XWiki.XWikiAdminGroup", "levels": "view", "allow": "1"})
-    status, body = wiki.request("GET", "/bin/get/LuxPedia/Workflow/PolicySetup?outputSyntax=plain")
-    if status != 200 or b"AUDIT_CLASS_READY" not in body:
-        raise RuntimeError("Could not initialize server-managed review audit fields")
+    status, body = wiki.request("POST", "/bin/get/LuxPedia/Workflow/PolicySetup?outputSyntax=plain",
+                                urllib.parse.urlencode({'form_token': wiki.form_token()}),
+                                'application/x-www-form-urlencoded')
+    verify_response(status, body, 'AUDIT_CLASS_READY', 'PolicySetup')
     for group in ("XWiki.LuxEditors", "XWiki.LuxReviewers", "XWiki.LuxReaders"):
         wiki.ensure_right("XWiki", "XWikiPreferences", {
             "groups": group, "levels": "script,programming", "allow": "0"})

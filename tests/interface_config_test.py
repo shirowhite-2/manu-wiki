@@ -91,7 +91,7 @@ class InterfaceConfigTest(unittest.TestCase):
 
     def test_security_setup_stops_when_component_is_missing(self):
         wiki = FakeWiki(policy=False)
-        with self.assertRaisesRegex(RuntimeError, 'Install workflow-policy'):
+        with self.assertRaisesRegex(RuntimeError, 'Install or update workflow-policy'):
             security.apply(Module, wiki)
         self.assertEqual(wiki.rights, [])
         self.assertNotIn(('LuxPedia/Code', 'ReviewAuditClass'), wiki.pages)
@@ -104,6 +104,25 @@ class InterfaceConfigTest(unittest.TestCase):
                 'groups': 'XWiki.' + group, 'levels': 'script,programming', 'allow': '0'}), wiki.rights)
         self.assertIn(('Knowledge', 'WebPreferences', {
             'groups': 'XWiki.LuxReaders', 'levels': 'comment', 'allow': '0'}), wiki.rights)
+        setup = next(request for request in wiki.requests if 'PolicySetup?' in request[1])
+        self.assertEqual(setup[0], 'POST')
+        self.assertEqual(setup[2], 'form_token=test-token')
+        self.assertNotIn('{{groovy}}', security.HEALTH + security.SETUP)
+
+    def test_script_denial_is_not_reported_as_a_missing_jar(self):
+        body = b'Failed to execute the [groovy] macro. The execution of the [groovy] script macro is not allowed.'
+        with self.assertRaisesRegex(RuntimeError, 'page author cannot execute'):
+            security.verify_response(200, body, 'luxpedia-workflow-policy-1', 'PolicyStatus')
+
+    def test_policy_marker_accepts_plain_or_rendered_output(self):
+        for body in (b'luxpedia-workflow-policy-1\n', b'<p>luxpedia-workflow-policy-1</p>'):
+            security.verify_response(200, body, 'luxpedia-workflow-policy-1', 'PolicyStatus')
+
+    def test_admin_and_token_errors_are_distinct(self):
+        with self.assertRaisesRegex(RuntimeError, 'wiki-level administrator'):
+            security.verify_response(200, b'POLICY_FORBIDDEN', 'AUDIT_CLASS_READY', 'PolicySetup')
+        with self.assertRaisesRegex(RuntimeError, 'invalid form token'):
+            security.verify_response(200, b'POLICY_BAD_TOKEN', 'AUDIT_CLASS_READY', 'PolicySetup')
 
     def test_translation_error_is_reported(self):
         wiki = FakeWiki()
