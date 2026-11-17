@@ -78,6 +78,12 @@ PAGES = {
 
 #lp('draftsIntro')
 
+#if($doc.hasAccessLevel('edit'))
+{{html clean="false"}}
+<p><a class="btn btn-primary" href="$escapetool.xml($xwiki.getURL('Drafts.WebHome', 'create', 'spaceReference=Drafts&parent=Drafts.WebHome&template=LuxPedia.Templates.Article'))">#lp('newArticle')</a></p>
+{{/html}}
+#end
+
 [[#lp('queue')>>PublicationWorkflow.Overview]] · [[#lp('editGuide')>>LuxPedia.Help.EditGuide]]
 ''' + END + '\n\n{{documents space="Drafts" count="100" actions="false" columns="doc.title, doc.location"/}}'),
     ("LuxPedia/Help", "EditGuide"): ("editGuide", V + "= #lp('editGuide') =\n\n#lp('guideContent')\n" + END),

@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 import apply_interface as interface
 import apply_workflow_security as security
+import apply_workflow as workflow
 from interface_assets import MESSAGES
 
 
@@ -73,7 +74,68 @@ class Module:
         pass
 
 
+class DraftHomeRightsWiki:
+    page_path = staticmethod(FakeWiki.page_path)
+
+    def __init__(self, rules, status=204):
+        self.rules = {key: dict(values) for key, values in rules.items()}
+        self.status = status
+        self.deleted = []
+
+    def objects(self, space, page, class_name):
+        assert (space, page) == ('Drafts', 'WebHome')
+        return [number for cls, number in self.rules if cls == class_name]
+
+    def object_values(self, space, page, class_name, number):
+        assert (space, page) == ('Drafts', 'WebHome')
+        return self.rules[(class_name, number)]
+
+    def form_token(self):
+        return 'test-token'
+
+    def request(self, method, path, **kwargs):
+        assert method == 'DELETE' and kwargs['token'] == 'test-token'
+        assert path.startswith(self.page_path('Drafts', 'WebHome') + '/objects/')
+        class_name, number = path.split('/objects/', 1)[1].rsplit('/', 1)
+        key = (class_name, int(number))
+        if self.status in (200, 204):
+            self.deleted.append(key)
+            del self.rules[key]
+        return self.status, b''
+
+
 class InterfaceConfigTest(unittest.TestCase):
+    def test_draft_creation_removes_only_obsolete_home_denials_and_is_repeatable(self):
+        obsolete = {'groups': 'XWiki.LuxEditors', 'levels': 'edit', 'allow': '0'}
+        retained = {
+            ('XWiki.XWikiRights', 1): dict(obsolete, users='XWiki.specificUser'),
+            ('XWiki.XWikiRights', 2): dict(obsolete, groups='XWiki.LuxReviewers'),
+            ('XWiki.XWikiGlobalRights', 3): dict(obsolete, levels='edit,delete'),
+            ('XWiki.XWikiRights', 4): dict(obsolete, allow='1')}
+        wiki = DraftHomeRightsWiki(retained)
+        wiki.rules.update({(cls, 0): dict(obsolete)
+                           for cls in ('XWiki.XWikiRights', 'XWiki.XWikiGlobalRights')})
+        workflow.restore_draft_creation(Module, wiki)
+        workflow.restore_draft_creation(Module, wiki)
+        self.assertEqual(wiki.rules, retained)
+        self.assertEqual(len(wiki.deleted), 2)
+
+    def test_failed_creation_acl_migration_stops_instead_of_claiming_success(self):
+        wiki = DraftHomeRightsWiki({('XWiki.XWikiRights', 0): {
+            'groups': 'XWiki.LuxEditors', 'levels': 'edit', 'allow': '0'}}, status=403)
+        with self.assertRaisesRegex(RuntimeError, 'Drafts create entry: HTTP 403'):
+            workflow.restore_draft_creation(Module, wiki)
+        self.assertEqual(len(wiki.rules), 1)
+
+    def test_new_article_entry_uses_native_form_and_article_template(self):
+        content = interface.PAGES[('Drafts', 'WebHome')][1]
+        self.assertIn("#if($doc.hasAccessLevel('edit'))", content)
+        self.assertIn("$xwiki.getURL('Drafts.WebHome', 'create',", content)
+        self.assertIn('spaceReference=Drafts&parent=Drafts.WebHome&template=LuxPedia.Templates.Article', content)
+        self.assertIn("#lp('newArticle')", content)
+        self.assertEqual(MESSAGES['en']['newArticle'], 'New article')
+        self.assertEqual(MESSAGES['zh']['newArticle'], '新建文章')
+
     def test_language_catalogs_match_and_default_is_english(self):
         self.assertEqual(MESSAGES['en'].keys(), MESSAGES['zh'].keys())
         wiki = FakeWiki()

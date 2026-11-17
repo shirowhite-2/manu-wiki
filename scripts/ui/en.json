@@ -65,6 +65,7 @@
   "homeIntro": "Find published knowledge by category, or open Drafts to propose an article.",
   "knowledgeIntro": "Published articles are available to readers. Changes go through a draft and independent review.",
   "draftsIntro": "Editors write here. Submitted articles are locked until a reviewer publishes or returns them. Readers cannot access drafts.",
+  "newArticle": "New article",
   "libraryIntro": "Articles you are allowed to read. Open a draft to propose changes to published content.",
   "categoryIntro": "Each article has one primary category and can have multiple tags. Administrators manage categories and access.",
   "adminOnly": "Only administrators can manage categories.",

@@ -605,7 +605,6 @@ def load_apply_module():
 
 # Right-column workflow panel, shown only in Drafts (space preference object).
 PANEL_VALUES = {"rightPanels": "PublicationWorkflow.PublicationWorkflowPanel"}
-HOME_RIGHTS = {"groups": "XWiki.LuxEditors", "levels": "edit", "allow": "0"}
 REVIEW_QUEUE_LINK = "* [[待审核队列>>PublicationWorkflow.Overview]]\n"
 LUXPEDIA_VIEW_ROLES = ("XWiki.LuxEditors", "XWiki.LuxReviewers", "XWiki.LuxReaders")
 # The Drafts home page is system-maintained; only admins may edit the index.
@@ -735,15 +734,23 @@ def bootstrap_workflow_targets(module, wiki):
             module.log(f"linked existing draft Drafts.{page} -> {target}")
 
 
-def ensure_page_right(wiki, space, page, properties):
-    """Ensure a document-scoped XWikiRights object (not space-scoped GlobalRights)."""
-    class_name = "XWiki.XWikiRights"
-    for number in wiki.objects(space, page, class_name):
-        values = wiki.object_values(space, page, class_name, number)
-        if all(values.get(key, "") == value for key, value in properties.items()):
-            return False
-    wiki.add_object(space, page, class_name, properties)
-    return True
+def restore_draft_creation(module, wiki):
+    """Remove our obsolete home EDIT denials, which also block the create action.
+
+    The installed server policy protects Drafts.WebHome saves independently of
+    core EDIT access. Preserve unrelated/custom ACLs and all space restrictions.
+    """
+    for class_name in ("XWiki.XWikiGlobalRights", "XWiki.XWikiRights"):
+        for number in wiki.objects("Drafts", "WebHome", class_name):
+            values = wiki.object_values("Drafts", "WebHome", class_name, number)
+            if (values.get("groups") == "XWiki.LuxEditors" and not values.get("users")
+                    and values.get("levels") == "edit" and values.get("allow") == "0"):
+                status, _ = wiki.request(
+                    "DELETE", wiki.page_path("Drafts", "WebHome") + f"/objects/{class_name}/{number}",
+                    token=wiki.form_token())
+                if status not in (200, 204):
+                    raise RuntimeError(f"Could not restore the Drafts create entry: HTTP {status}")
+                module.log(f"removed obsolete Drafts home editor denial ({class_name})")
 
 
 def apply(module, wiki):
@@ -802,20 +809,8 @@ def apply(module, wiki):
             raise RuntimeError(f"移除草稿首页误启动的工作流失败: {status} {body[:200]}")
         module.log("removed accidental workflow from Drafts.WebHome")
 
-    module.log("== protect system-maintained Drafts home")
-    # Remove the earlier incorrectly-scoped GlobalRights rule, which did not
-    # remove the editor's inherited space edit access on this single page.
-    for number in wiki.objects("Drafts", "WebHome", "XWiki.XWikiGlobalRights"):
-        values = wiki.object_values("Drafts", "WebHome", "XWiki.XWikiGlobalRights", number)
-        if values.get("groups") == "XWiki.LuxEditors" and values.get("levels") == "edit" and values.get("allow") == "0":
-            status, body = wiki.request(
-                "DELETE", wiki.page_path("Drafts", "WebHome") + f"/objects/XWiki.XWikiGlobalRights/{number}",
-                token=wiki.form_token())
-            if status not in (200, 204):
-                raise RuntimeError(f"清理错误类型的草稿首页权限失败: {status} {body[:200]}")
-            module.log("removed incorrectly-scoped home-page GlobalRights")
-    if ensure_page_right(wiki, "Drafts", "WebHome", HOME_RIGHTS):
-        module.log("created document-scoped editor denial")
+    module.log("== restore draft creation; server policy protects home saves")
+    restore_draft_creation(module, wiki)
 
     module.log("== expose pending-review queue")
     title, content, _, author = read_page(wiki, "Drafts", "WebHome")
@@ -889,7 +884,7 @@ def main():
             module.log(f"  {key} = {value}")
         module.log("  Drafts.WebPreferences rightPanels = PublicationWorkflow.PublicationWorkflowPanel")
         module.log("  Drafts editors: view, comment, edit")
-        module.log("  Drafts.WebHome: document-scoped editor edit denial (system-maintained index)")
+        module.log("  Drafts.WebHome: restore editor create entry; server policy protects index saves")
         return
 
     apply(module, wiki)

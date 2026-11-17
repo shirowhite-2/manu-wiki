@@ -134,6 +134,17 @@ class WorkflowPolicyListenerTest {
     @Test void editorCanWriteAnUnsubmittedArticle() throws Exception {
         assertDoesNotThrow(() -> policy.check(doc, context, false));
     }
+    @Test void editorCannotSaveDraftIndexEvenWithCoreEditAccess() throws Exception {
+        when(doc.getDocumentReference()).thenReturn(ref("Drafts.WebHome"));
+        when(policy.authorization.hasAccess(Right.EDIT, user, ref("Drafts.WebHome"))).thenReturn(true);
+        var error = assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
+        assertEquals("Only administrators may change space settings or indexes.", error.getMessage());
+    }
+    @Test void editorCanCreateANestedDraftWithCoreEditAccess() throws Exception {
+        when(old.isNew()).thenReturn(true);
+        when(policy.authorization.hasAccess(Right.EDIT, user, doc.getDocumentReference())).thenReturn(true);
+        assertDoesNotThrow(() -> policy.check(doc, context, false));
+    }
     @Test void editorCanWriteADraft() throws Exception {
         states("draft", "draft"); assertDoesNotThrow(() -> policy.check(doc, context, false));
     }
