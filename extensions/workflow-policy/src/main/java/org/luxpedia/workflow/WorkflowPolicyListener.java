@@ -287,6 +287,25 @@ public class WorkflowPolicyListener implements EventListener
         return resolver.resolve(drafts.get(0), target);
     }
     public String getPolicyVersion() { return "luxpedia-workflow-policy-1"; }
+    /** Deployment migration: remove historical validator EDIT grants without re-authoring content. */
+    public int repairExistingDraftRights(XWikiContext context) throws Exception {
+        require(authorization.hasAccess(Right.ADMIN, context.getUserReference(),
+            new DocumentReference(context.getWikiId(), "XWiki", "XWikiPreferences")), "Administrator required.");
+        List<String> drafts = queries.createQuery("from doc.object(PublicationWorkflow.PublicationWorkflowClass) as wf " +
+            "where wf.istarget = 0 and (doc.space = 'Drafts' or doc.space like 'Drafts.%')", Query.XWQL)
+            .setWiki(context.getWikiId()).execute();
+        int repaired = 0;
+        for (String name : drafts) {
+            XWikiDocument original = context.getWiki().getDocument(resolver.resolve(name), context);
+            XWikiDocument draft = original.clone();
+            normalizeDraftRights(draft, status(draft.getObject(WF)), context);
+            draft.setHidden(false);
+            draft.setContentAuthorReference(original.getContentAuthorReference());
+            context.getWiki().saveDocument(draft, "Normalize LuxPedia workflow role permissions", true, context);
+            repaired++;
+        }
+        return repaired;
+    }
     private static String legacyMetadata() {
         try (var stream = WorkflowPolicyListener.class.getResourceAsStream("/legacy-article-metadata.xwiki")) {
             if (stream == null) { throw new IllegalStateException("Missing legacy metadata template"); }

@@ -97,6 +97,7 @@ class WorkflowPolicyListenerTest {
         context = mock(XWikiContext.class); wiki = mock(XWiki.class);
         user = ref("XWiki.currentUser");
         when(context.getUserReference()).thenReturn(user);
+        when(context.getWikiId()).thenReturn("xwiki");
         when(context.getWiki()).thenReturn(wiki);
         documents = new HashMap<>(); rights = new ArrayList<>();
         when(wiki.getDocument(any(DocumentReference.class), eq(context))).thenAnswer(invocation -> {
@@ -303,5 +304,23 @@ class WorkflowPolicyListenerTest {
         verify(query).bindValue("full", "xwiki:Knowledge.Technical.Article");
         when(query.execute()).thenReturn(List.of("Drafts.One", "Drafts.Two"));
         assertThrows(SecurityException.class, () -> listener.findDraft(ref("Knowledge.Technical.Article"), context));
+    }
+    @Test void historicalRightsRepairRequiresAdministrator() {
+        assertThrows(SecurityException.class, () -> policy.repairExistingDraftRights(context));
+    }
+    @Test void historicalRightsRepairPreservesContentAuthor() throws Exception {
+        when(policy.authorization.hasAccess(eq(Right.ADMIN), eq(user), any())).thenReturn(true);
+        policy.queries = mock(QueryManager.class);
+        Query query = mock(Query.class, RETURNS_SELF);
+        when(policy.queries.createQuery(anyString(), eq(Query.XWQL))).thenReturn(query);
+        when(query.execute()).thenReturn(List.of("Drafts.Article.WebHome"));
+        when(policy.resolver.resolve("Drafts.Article.WebHome")).thenReturn(ref("Drafts.Article.WebHome"));
+        when(old.clone()).thenReturn(doc);
+        when(old.getContentAuthorReference()).thenReturn(ref("XWiki.originalAuthor"));
+        states("validating", "validating");
+        assertEquals(1, policy.repairExistingDraftRights(context));
+        verify(doc).setContentAuthorReference(ref("XWiki.originalAuthor"));
+        verify(doc, never()).setContent(anyString());
+        verify(wiki).saveDocument(doc, "Normalize LuxPedia workflow role permissions", true, context);
     }
 }

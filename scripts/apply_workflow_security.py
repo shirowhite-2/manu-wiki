@@ -44,6 +44,8 @@ def changed = false
 if (c.get("submittedBy") == null) { c.addTextField("submittedBy", "Submitted by", 60); changed = true }
 if (c.get("submittedVersion") == null) { c.addTextField("submittedVersion", "Submitted version", 30); changed = true }
 if (changed) d.save("Ensure review audit fields")
+def listener = com.xpn.xwiki.web.Utils.getComponent(org.xwiki.observation.EventListener.class, "luxpedia-workflow-policy")
+println("Draft permissions normalized: " + listener.repairExistingDraftRights(xcontext.getContext()))
 println("AUDIT_CLASS_READY")
 {{/groovy}}'''
     wiki.ensure_page("LuxPedia/Workflow", "PolicySetup", "Workflow policy setup", class_setup, hidden=True, update=True)
