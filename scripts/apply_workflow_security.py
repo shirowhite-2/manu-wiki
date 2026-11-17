@@ -42,6 +42,7 @@ def d = xwiki.getDocument("LuxPedia.Code.ReviewAuditClass")
 def c = d.getDocument().getXClass()
 def changed = false
 if (c.get("submittedBy") == null) { c.addTextField("submittedBy", "Submitted by", 60); changed = true }
+if (c.get("authoredBy") == null) { c.addTextField("authoredBy", "Content authored by", 60); changed = true }
 if (c.get("submittedVersion") == null) { c.addTextField("submittedVersion", "Submitted version", 30); changed = true }
 if (changed) d.save("Ensure review audit fields")
 def listener = com.xpn.xwiki.web.Utils.getComponent(org.xwiki.observation.EventListener.class, "luxpedia-workflow-policy")

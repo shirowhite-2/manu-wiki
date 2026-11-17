@@ -137,6 +137,9 @@ public class WorkflowPolicyListener implements EventListener
                 if (audit == null) { audit = doc.newXObject(resolver.resolve(AUDIT, ref), context); }
                 audit.set("submittedBy", user.toString(), context);
                 audit.set("submittedVersion", old.getVersion(), context);
+                DocumentReference contentAuthor = old.getContentAuthorReference();
+                require(contentAuthor != null, "The submitted content must have a recorded author.");
+                audit.set("authoredBy", contentAuthor.toString(), context);
                 break;
             case "validate":
             case "publish":
@@ -172,9 +175,10 @@ public class WorkflowPolicyListener implements EventListener
 
     void independentReviewer(XWikiDocument draft, DocumentReference user) {
         BaseObject audit = draft.getObject(AUDIT);
-        require(audit != null && !audit.getStringValue("submittedBy").isBlank(),
+        require(audit != null && !audit.getStringValue("submittedBy").isBlank() && !audit.getStringValue("authoredBy").isBlank(),
             "Legacy pending drafts must be resubmitted by an editor before review.");
-        require(!user.toString().equals(audit.getStringValue("submittedBy")) && !user.equals(draft.getCreatorReference()),
+        require(!user.toString().equals(audit.getStringValue("submittedBy")) &&
+            !user.toString().equals(audit.getStringValue("authoredBy")) && !user.equals(draft.getCreatorReference()),
             "You cannot approve, publish or reject your own article submission.");
     }
 

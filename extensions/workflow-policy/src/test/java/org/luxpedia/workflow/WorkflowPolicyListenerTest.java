@@ -80,6 +80,7 @@ class WorkflowPolicyListenerTest {
     void audit(XWikiDocument article, String submitter) {
         BaseObject audit = mock(BaseObject.class);
         when(audit.getStringValue("submittedBy")).thenReturn(ref("XWiki." + submitter).toString());
+        when(audit.getStringValue("authoredBy")).thenReturn(ref("XWiki.contentAuthor").toString());
         when(article.getObject(WorkflowPolicyListener.AUDIT)).thenReturn(audit);
         when(article.getCreatorReference()).thenReturn(ref("XWiki.originalAuthor"));
     }
@@ -109,6 +110,7 @@ class WorkflowPolicyListenerTest {
         });
         doc = document("Drafts.Article.WebHome");
         old = document("Drafts.Article.WebHome");
+        when(old.getContentAuthorReference()).thenReturn(ref("XWiki.contentAuthor"));
         when(doc.getOriginalDocument()).thenReturn(old);
         group("Editors");
     }
@@ -322,5 +324,10 @@ class WorkflowPolicyListenerTest {
         verify(doc).setContentAuthorReference(ref("XWiki.originalAuthor"));
         verify(doc, never()).setContent(anyString());
         verify(wiki).saveDocument(doc, "Normalize LuxPedia workflow role permissions", true, context);
+    }
+    @Test void latestContentAuthorCannotReviewEvenWhenSomeoneElseSubmits() throws Exception {
+        group("Reviewers"); policy.operation = "validate"; states("validating", "valid"); audit(old, "anotherEditor");
+        when(old.getObject(WorkflowPolicyListener.AUDIT).getStringValue("authoredBy")).thenReturn(user.toString());
+        assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
     }
 }
