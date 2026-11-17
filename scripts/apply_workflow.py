@@ -1,0 +1,873 @@
+#!/usr/bin/env python3
+"""Configure the two-role publication workflow for LuxPedia.
+
+Roles:
+  - contributor = XWiki.LuxEditors   (edit drafts, submit for review)
+  - validator   = XWiki.LuxReviewers (review and publish to Knowledge)
+  - moderator   left empty           (two-role setup, no separate moderator)
+
+Creates the configuration page LuxPedia.Workflow.Config with a
+PublicationWorkflowConfigClass object. Idempotent: an existing object with the
+same values is left unchanged. Reuses apply_sprint1.XWiki.
+Default is a dry run; pass --apply to write.
+"""
+import argparse
+from html.parser import HTMLParser
+import importlib.util
+import os
+import re
+import sys
+import urllib.parse
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+CONFIG_SPACE = "LuxPedia/Workflow"
+CONFIG_PAGE = "Config"
+CONFIG_CLASS = "PublicationWorkflow.PublicationWorkflowConfigClass"
+
+CONFIG_VALUES = {
+    "contributor": "XWiki.LuxEditors",
+    "validator": "XWiki.LuxReviewers",
+    "moderator": "",
+    "viewer": "",
+    "commenter": "",
+    "defaultDraftSpace": "Drafts",
+    "defaultTargetSpace": "Knowledge",
+    "moveStrategy": "doNothing",
+    # ACLs protect Drafts; hiding pages at the UI/index layer also hid the
+    # pending entries from the reviewer queue.
+    "draftsHidden": "0",
+    "skipDraftRights": "0",
+    "allowCustomPublicationComment": "0",
+}
+
+CONFIG_CONTENT = """Two-role publication workflow configuration for LuxPedia.
+
+* Editors (XWiki.LuxEditors) edit drafts in Drafts and submit them for review.
+* Reviewers (XWiki.LuxReviewers) review and publish to Knowledge.
+"""
+
+UX_SPACE = "LuxPedia/Code"
+UX_PAGE = "WorkflowUXScript"
+WORKFLOW_UX_JS = r"""(function () {
+  'use strict';
+
+  var PREFIX = 'luxpedia.workflow.submit.';
+  var CONFIG = 'xwiki:LuxPedia.Workflow.Config';
+  var CLASS = 'PublicationWorkflow.PublicationWorkflowClass';
+  var ARTICLE_CLASS = 'LuxPedia.Code.ArticleClass';
+  var REST = '/rest/wikis/xwiki/';
+var busy = false;
+
+  function translateWorkflowUI() {
+    var statusMap = {
+      'Current status: Draft': '当前状态：草稿（未提交）',
+      'Current status: Currently being moderated': '当前状态：待初审',
+      'Current status: Currently being validated': '当前状态：待审核，尚未发布',
+      'Current status: Valid': '当前状态：审核通过，待发布',
+      'Current status: Published': '当前状态：已发布',
+      'Current status: Archived': '当前状态：已归档'
+    };
+    document.querySelectorAll('.publicationworkflow-info p').forEach(function (node) {
+      var value = node.textContent.trim();
+      if (statusMap[value]) { node.textContent = statusMap[value]; }
+    });
+    document.querySelectorAll('.publicationworkflow-info input[type="submit"], .publicationworkflow-info button')
+      .forEach(function (button) {
+        var value = (button.value || button.textContent || '').trim();
+        var labels = {
+          'Publish': '审核通过并发布',
+          'Validate without publishing': '审核通过（暂不发布）',
+          'Refuse': '退回修改',
+          'Submit to moderation': '提交审核',
+          'Submit for validation': '提交审核',
+          'Start workflow': '启动审批流程',
+          'Go to draft': '打开修改草稿'
+        };
+        if (labels[value]) {
+          if (button.tagName === 'INPUT') { button.value = labels[value]; }
+          else { button.textContent = labels[value]; }
+        }
+      });
+    document.querySelectorAll('h1,h2,h3,.panel-title,.panel-heading').forEach(function (node) {
+      if (node.textContent.trim() === 'Workflow') { node.textContent = '审批流程'; }
+    });
+  }
+
+  function documentReference() {
+    var meta = document.querySelector('meta[name="document"]');
+    return meta ? meta.content : '';
+  }
+
+  function currentUser() {
+    var links = Array.from(document.querySelectorAll('a[href*="/bin/view/XWiki/"]'));
+    for (var i = 0; i < links.length; i++) {
+      var match = links[i].getAttribute('href').match(/\/bin\/view\/XWiki\/([^/?#]+)/);
+      if (match && !['XWikiUsers', 'XWikiGroups'].includes(match[1])) {
+        return 'XWiki.' + decodeURIComponent(match[1]);
+      }
+    }
+    return '';
+  }
+
+  function restSpaces(reference) {
+    var parts = reference.split('.');
+    var spaces = parts.slice(0, -1).map(function (part) {
+      return 'spaces/' + encodeURIComponent(part);
+    });
+    return spaces.join('/') + (spaces.length ? '/' : '') + 'pages/' + encodeURIComponent(parts[parts.length - 1]);
+  }
+
+  function getJson(path) {
+    return fetch(REST + path, { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+      .then(function (response) {
+        if (!response.ok) { throw new Error('HTTP ' + response.status); }
+        return response.json();
+      });
+  }
+
+  function groupHasMember(group, user) {
+    var path = 'spaces/XWiki/pages/' + encodeURIComponent(group) + '/objects/XWiki.XWikiGroups';
+    return getJson(path).then(function (data) {
+      var objects = data.objectSummaries || [];
+      return Promise.all(objects.map(function (object) {
+        return getJson('spaces/XWiki/pages/' + encodeURIComponent(group) +
+          '/objects/XWiki.XWikiGroups/' + object.number + '/properties/member')
+          .then(function (property) { return property.value === user; })
+          .catch(function () { return false; });
+      })).then(function (values) { return values.some(Boolean); });
+    }).catch(function () { return false; });
+  }
+
+  function isEditor(user) {
+    return groupHasMember('LuxEditors', user);
+  }
+
+  function isManager(user) {
+    return Promise.all([
+      groupHasMember('LuxManagers', user),
+      groupHasMember('XWikiAdminGroup', user)
+    ]).then(function (values) { return values.some(Boolean) || user === 'XWiki.Admin'; });
+  }
+
+  function spaceAndPage(reference) {
+    var parts = reference.split('.');
+    return { page: parts.pop(), spaces: parts };
+  }
+
+  function primaryCategory(reference) {
+    var base = restSpaces(reference);
+    return getJson(base + '/objects/' + encodeURIComponent(ARTICLE_CLASS))
+      .then(function (data) {
+        var object = (data.objectSummaries || [])[0];
+        if (!object) { return ''; }
+        return getJson(base + '/objects/' + encodeURIComponent(ARTICLE_CLASS) +
+          '/' + object.number + '/properties/primaryCategory').then(function (property) {
+          return property.value || '';
+        });
+      }).catch(function () { return ''; });
+  }
+
+  function categoryOptions() {
+    return fetch('/bin/view/Knowledge/CategoryIndex', { credentials: 'same-origin' })
+      .then(function (response) { return response.ok ? response.text() : ''; })
+      .then(function (html) {
+        var parsed = new DOMParser().parseFromString(html, 'text/html');
+        var links = Array.from(parsed.querySelectorAll('a[href]'));
+        var result = [];
+        for (var i = 0; i < links.length; i++) {
+          var link = links[i];
+          var label = link.textContent.trim();
+          var path = new URL(link.getAttribute('href'), location.origin).pathname;
+          var match = path.match(/^\/bin\/view\/Knowledge\/([^/]+)\/(?:WebHome)?$/);
+          if (match && label && !result.some(function (entry) { return entry.key === decodeURIComponent(match[1]); })) {
+            result.push({ key: decodeURIComponent(match[1]), label: label });
+          }
+        }
+        return result;
+      }).catch(function () { return []; });
+  }
+
+  function categorySpace(label) {
+    if (!label) { return Promise.resolve(''); }
+    return categoryOptions().then(function (options) {
+      var selected = options.find(function (entry) { return entry.label === label; });
+      return selected ? selected.key : '';
+    });
+  }
+
+  function defaultTarget(reference, selectedKey) {
+    var info = spaceAndPage(reference);
+    if (selectedKey !== undefined && selectedKey !== null) {
+      return Promise.resolve({
+        parent: selectedKey === '__root__' ? 'Knowledge' : 'Knowledge.' + selectedKey,
+        name: info.page
+      });
+    }
+    return primaryCategory(reference).then(function (category) {
+      return categorySpace(category).then(function (categoryKey) {
+        var parentParts = ['Knowledge'];
+        if (categoryKey) {
+          parentParts.push(categoryKey);
+        } else if (info.spaces.length > 1) {
+          parentParts = parentParts.concat(info.spaces.slice(1));
+        }
+        return { parent: parentParts.join('.'), name: info.page };
+      });
+    });
+  }
+
+  function persistPrimaryCategory(reference, categoryLabel) {
+    var base = restSpaces(reference);
+    return getJson(base + '/objects/' + encodeURIComponent(ARTICLE_CLASS)).then(function (data) {
+      var object = (data.objectSummaries || [])[0];
+      if (!object) {
+        // A plain page without ArticleClass still needs searchable category
+        // metadata. Create the object after the page has been saved.
+        var info = spaceAndPage(reference);
+        var titleNode = document.querySelector('#document-title h1');
+        var fields = new URLSearchParams();
+        fields.set('className', ARTICLE_CLASS);
+        fields.set('property#title', titleNode ? titleNode.textContent.trim() : info.page);
+        fields.set('property#primaryCategory', categoryLabel);
+        fields.set('property#owner', currentUser());
+        fields.set('property#status', 'draft');
+        fields.set('property#tagsText', '');
+        fields.set('property#summary', '');
+        return freshFormToken().then(function (token) {
+          if (!token) { return false; }
+          fields.set('form_token', token);
+          return fetch(REST + base + '/objects', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: fields.toString()
+          }).then(function (response) { return response.ok; });
+        });
+      }
+      var propertyPath = base + '/objects/' + encodeURIComponent(ARTICLE_CLASS) + '/' + object.number +
+        '/properties/primaryCategory';
+      return getJson(propertyPath).then(function (property) {
+        if ((property.value || '') === categoryLabel) { return true; }
+        return freshFormToken().then(function (token) {
+          if (!token) { return false; }
+          return fetch(REST + propertyPath, {
+            method: 'PUT', credentials: 'same-origin',
+            headers: { 'Content-Type': 'text/plain', 'XWiki-Form-Token': token },
+            body: categoryLabel
+          }).then(function (response) { return response.ok; });
+        });
+      });
+    }).catch(function () { return false; });
+  }
+
+  function formTokenFromDocument(doc) {
+    var tokenNode = doc.querySelector('[data-xwiki-form-token]');
+    var token = tokenNode && tokenNode.getAttribute('data-xwiki-form-token');
+    if (!token) {
+      var tokenInput = doc.querySelector('input[name="form_token"]');
+      token = tokenInput && tokenInput.value;
+    }
+    if (!token) {
+      var logout = doc.querySelector('#tmLogout');
+      if (logout) { token = new URL(logout.href, location.origin).searchParams.get('form_token'); }
+    }
+    return token || '';
+  }
+
+  function freshFormToken() {
+    return fetch('/bin/view/Main/', { credentials: 'same-origin', cache: 'no-store' })
+      .then(function (response) { return response.ok ? response.text() : ''; })
+      .then(function (html) {
+        if (!html) { return formTokenFromDocument(document); }
+        return formTokenFromDocument(new DOMParser().parseFromString(html, 'text/html'));
+      }).catch(function () { return formTokenFromDocument(document); });
+  }
+
+  function readChosenCategory(reference) {
+    try {
+      var value = sessionStorage.getItem(PREFIX + reference + '.category');
+      return value ? JSON.parse(value) : null;
+    } catch (error) { return null; }
+  }
+
+  function workflowStatus(reference) {
+    var base = restSpaces(reference);
+    return getJson(base + '/objects/' + encodeURIComponent(CLASS))
+      .then(function (data) {
+        var object = (data.objectSummaries || [])[0];
+        if (!object) { return ''; }
+        return getJson(base + '/objects/' + encodeURIComponent(CLASS) + '/' + object.number + '/properties/status')
+          .then(function (property) { return property.value || ''; });
+      }).catch(function () { return ''; });
+  }
+
+  function workflowObjectExists(reference) {
+    var base = restSpaces(reference);
+    return getJson(base + '/objects/' + encodeURIComponent(CLASS))
+      .then(function (data) { return (data.objectSummaries || []).length > 0; })
+      .catch(function () { return false; });
+  }
+
+  function workflowTarget(reference) {
+    var base = restSpaces(reference);
+    return getJson(base + '/objects/' + encodeURIComponent(CLASS)).then(function (data) {
+      var object = (data.objectSummaries || [])[0];
+      if (!object) { return ''; }
+      return getJson(base + '/objects/' + encodeURIComponent(CLASS) + '/' + object.number + '/properties/target')
+        .then(function (property) { return property.value || ''; });
+    }).catch(function () { return ''; });
+  }
+
+  function setFormValue(form, name, value) {
+    var input = form.querySelector('[name="' + name + '"]');
+    if (input) {
+      input.value = value;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  }
+
+  function hideAdvancedOptions() {
+    var link = document.querySelector('#workflow-options, a.workflow-options');
+    if (link) { link.style.display = 'none'; }
+  }
+
+  function workflowActionForm(actions) {
+    return Array.from(document.querySelectorAll('form')).find(function (form) {
+      var action = form.querySelector('input[name="action"]');
+      return action && actions.indexOf(action.value) !== -1 &&
+        (form.getAttribute('action') || '').indexOf('PublicationWorkflow/Script') !== -1;
+    });
+  }
+
+  function workflowFormSubmit(form) {
+    if (!form) { return false; }
+    var submit = form.querySelector('input[type="submit"],button[type="submit"]');
+    if (!submit) { return false; }
+    submit.click();
+    return true;
+  }
+
+  function prepareStartForm(reference, target) {
+    var form = workflowActionForm(['start']);
+    if (!form) { return false; }
+    setFormValue(form, 'targetSpace', target.parent);
+    setFormValue(form, 'targetName', target.name);
+    setFormValue(form, 'targetIsTerminal', 'on');
+    var terminal = form.querySelector('[name="targetIsTerminal"]');
+    if (terminal) { terminal.checked = true; }
+    var startAsTarget = form.querySelector('[name="startAsTarget"]');
+    var editingPublishedArticle = reference.indexOf('Knowledge.') === 0;
+    if (startAsTarget) { startAsTarget.checked = editingPublishedArticle; }
+    var workflow = form.querySelector('[name="workflow"]');
+    if (workflow) {
+      var option = Array.from(workflow.options).find(function (item) {
+        return item.value === CONFIG || item.value.endsWith('/LuxPedia/Workflow/Config') ||
+          item.textContent.indexOf('LuxPedia 发布流程配置') !== -1;
+      });
+      if (option) { workflow.value = option.value; }
+    }
+    hideAdvancedOptions();
+    return true;
+  }
+
+  function continuePendingSubmission(reference) {
+    var key = PREFIX + reference;
+    if (sessionStorage.getItem(key) !== '1' || busy) { return; }
+    busy = true;
+    workflowObjectExists(reference).then(function (exists) {
+      if (!exists) {
+        var chosen = readChosenCategory(reference);
+        var persist = chosen ? persistPrimaryCategory(reference, chosen.label || '') : Promise.resolve(true);
+        return persist.then(function (saved) {
+          if (!saved) {
+            sessionStorage.removeItem(key);
+            sessionStorage.removeItem(key + '.category');
+            window.alert('分类信息保存失败，请重试；草稿尚未提交。');
+            return 'done';
+          }
+          return defaultTarget(reference, chosen ? chosen.key : undefined).then(function (target) {
+            var form = workflowActionForm(['start']);
+            if (form && prepareStartForm(reference, target) && workflowFormSubmit(form)) { return 'started'; }
+            return 'waiting';
+          });
+        });
+      }
+      return workflowStatus(reference).then(function (status) {
+        if (status === 'draft') {
+          var form = workflowActionForm(['submitformoderation', 'submitforvalidation']);
+          if (workflowFormSubmit(form)) { return 'submitted'; }
+          return 'waiting';
+        }
+        if (status === 'moderating' || status === 'validating' || status === 'validated' ||
+            status === 'published' || status === 'refused') {
+          sessionStorage.removeItem(key);
+          sessionStorage.removeItem(key + '.category');
+          return 'done';
+        }
+        return 'waiting';
+      });
+    }).then(function (state) {
+      if (state === 'done') { return; }
+      busy = false;
+      if (state === 'waiting') { setTimeout(function () { continuePendingSubmission(reference); }, 900); }
+      // After starting or submitting, XWiki redirects/reloads the same page. The
+      // session flag is intentionally kept until the validating state is visible.
+    }).catch(function () { busy = false; });
+  }
+
+  function installDoneButton(reference, isAdmin) {
+    if (isAdmin || !location.pathname.match(/^\/bin\/edit\/Drafts(?:\/|$)/)) { return true; }
+    var done = document.querySelector('button.realtime-action-done');
+    if (!done) { return false; }
+    if (done.getAttribute('data-luxpedia-submit-bound') === '1') { return true; }
+    done.setAttribute('data-luxpedia-submit-bound', '1');
+    done.title = '保存并提交审核';
+    Array.from(done.childNodes).forEach(function (node) {
+      if (node.nodeType === Node.TEXT_NODE) { node.textContent = ''; }
+    });
+    var text = Array.from(done.querySelectorAll('*')).find(function (node) {
+      return node.childElementCount === 0 && node.textContent.trim() === 'Done';
+    });
+    if (text) { text.textContent = '保存并提交审核'; }
+    else { done.appendChild(document.createTextNode('保存并提交审核')); }
+    done.addEventListener('click', function () {
+      sessionStorage.setItem(PREFIX + reference, '1');
+      var category = document.querySelector('#luxpedia-publish-category');
+      if (category) {
+        var option = category.options[category.selectedIndex];
+        sessionStorage.setItem(PREFIX + reference + '.category', JSON.stringify({
+          key: category.value,
+          label: option && option.dataset.label || ''
+        }));
+      }
+    }, true);
+    return true;
+  }
+
+  function waitForDoneButton(reference, isAdmin, attempts) {
+    if (installDoneButton(reference, isAdmin) || attempts >= 40) { return; }
+    setTimeout(function () { waitForDoneButton(reference, isAdmin, attempts + 1); }, 500);
+  }
+
+  function installCategorySelector(reference, isAdmin, attempts) {
+    if (isAdmin || attempts >= 30 || !location.pathname.match(/^\/bin\/edit\/Drafts(?:\/|$)/) ||
+        document.getElementById('luxpedia-category-choice')) { return; }
+    workflowObjectExists(reference).then(function (hasWorkflow) {
+      var container = document.createElement('div');
+      container.id = 'luxpedia-category-choice';
+      container.style.cssText = 'margin:8px 0;padding:8px 10px;background:#f5f7fa;border:1px solid #d9dee7;border-radius:4px;';
+      if (hasWorkflow) {
+        workflowTarget(reference).then(function (target) {
+          container.textContent = target ? '提交后将发布到原位置：' + target : '此草稿已关联发布位置，提交后会保持原分类。';
+          var editor = document.querySelector('#xwikieditor');
+          if (editor && editor.parentNode) { editor.parentNode.insertBefore(container, editor); }
+        });
+        return;
+      }
+      Promise.all([categoryOptions(), primaryCategory(reference)]).then(function (values) {
+        var options = Array.isArray(values[0]) ? values[0] : [];
+        var current = values[1];
+        var info = spaceAndPage(reference);
+        var select = document.createElement('select');
+        select.id = 'luxpedia-publish-category';
+        select.className = 'form-control';
+        select.style.cssText = 'display:inline-block;width:auto;min-width:14em;margin:0 8px;';
+        var rootOption = document.createElement('option');
+        rootOption.value = '__root__';
+        rootOption.textContent = '知识库根目录';
+        rootOption.dataset.label = '';
+        select.appendChild(rootOption);
+        options.forEach(function (entry) {
+          var option = document.createElement('option');
+          option.value = entry.key;
+          option.textContent = entry.label;
+          option.dataset.label = entry.label;
+          select.appendChild(option);
+        });
+        var selected = options.find(function (entry) { return entry.label === current; });
+        if (selected) { select.value = selected.key; }
+        else if (info.spaces.length > 1) {
+          var nestedKey = info.spaces.slice(1).join('.');
+          if (options.some(function (entry) { return entry.key === nestedKey; })) { select.value = nestedKey; }
+        }
+        var label = document.createElement('label');
+        label.htmlFor = select.id;
+        label.textContent = '审核通过后发布到分类：';
+        var hint = document.createElement('span');
+        hint.style.cssText = 'color:#666;margin-left:6px;';
+        hint.textContent = '默认使用文章主分类，可在提交前调整。';
+        container.appendChild(label);
+        container.appendChild(select);
+        container.appendChild(hint);
+        var editor = document.querySelector('#xwikieditor');
+        if (editor && editor.parentNode) { editor.parentNode.insertBefore(container, editor); }
+      });
+    }).catch(function () {
+      setTimeout(function () { installCategorySelector(reference, isAdmin, attempts + 1); }, 500);
+    });
+  }
+
+  function prepareVisibleStartForm(reference, attempts) {
+    if (attempts >= 30) { return; }
+    if (!workflowActionForm(['start'])) {
+      setTimeout(function () { prepareVisibleStartForm(reference, attempts + 1); }, 500);
+      return;
+    }
+    defaultTarget(reference).then(function (target) {
+      if (!prepareStartForm(reference, target)) {
+        setTimeout(function () { prepareVisibleStartForm(reference, attempts + 1); }, 500);
+      }
+    });
+  }
+
+  var initPending = false;
+  var initializedReference = '';
+  function init() {
+    var reference = documentReference();
+    var user = currentUser();
+    if (!reference || !user || initPending || initializedReference === reference) { return; }
+    initPending = true;
+    Promise.all([isEditor(user), isManager(user)]).then(function (roles) {
+      initPending = false;
+      if (!roles[0]) { return; }
+      initializedReference = reference;
+      var isAdmin = roles[1];
+      waitForDoneButton(reference, isAdmin, 0);
+      installCategorySelector(reference, isAdmin, 0);
+      if (location.pathname.indexOf('/bin/view/') === 0) {
+        continuePendingSubmission(reference);
+        // Drafts use category-derived targets; published pages start as targets,
+        // which preserves the exact existing Knowledge location.
+        if (reference.indexOf('Drafts.') === 0 || reference.indexOf('Knowledge.') === 0) {
+          prepareVisibleStartForm(reference, 0);
+        }
+      }
+    }).catch(function () { initPending = false; });
+  }
+
+  // The global navigation identity and the realtime editor controls can be
+  // injected after this extension is loaded. Retry briefly instead of silently
+  // leaving editors with the standard Done button.
+  var bootAttempts = 0;
+  function boot() {
+    translateWorkflowUI();
+    init();
+    resumePendingSubmission();
+    bootAttempts += 1;
+    if (bootAttempts < 30) { setTimeout(boot, 500); }
+  }
+  function resumePendingSubmission() {
+    if (location.pathname.indexOf('/bin/view/') !== 0) { return; }
+    var reference = documentReference();
+    if (reference && sessionStorage.getItem(PREFIX + reference) === '1') {
+      continuePendingSubmission(reference);
+    }
+  }
+  if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', boot); }
+  else { boot(); }
+  window.setInterval(resumePendingSubmission, 700);
+  if (document.body) {
+    new MutationObserver(translateWorkflowUI).observe(document.body, {
+      subtree: true, childList: true, characterData: true
+    });
+  }
+})();
+"""
+
+WORKFLOW_UX_PROPERTIES = {
+    "name": "luxpedia.workflowUX",
+    "code": WORKFLOW_UX_JS,
+    "use": "always",
+    "parse": "0",
+    "cache": "long",
+}
+
+
+def load_apply_module():
+    spec = importlib.util.spec_from_file_location("apply_sprint1", ROOT / "scripts" / "apply_sprint1.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# Right-column workflow panel, shown only in Drafts (space preference object).
+PANEL_VALUES = {"rightPanels": "PublicationWorkflow.PublicationWorkflowPanel"}
+HOME_RIGHTS = {"groups": "XWiki.LuxEditors", "levels": "edit", "allow": "0"}
+REVIEW_QUEUE_LINK = "* [[待审核队列>>PublicationWorkflow.Overview]]\n"
+LUXPEDIA_VIEW_ROLES = ("XWiki.LuxEditors", "XWiki.LuxReviewers", "XWiki.LuxReaders")
+# The Drafts home page is system-maintained; only admins may edit the index.
+def read_page(wiki, space, page):
+    status, body = wiki.request("GET", wiki.page_path(space, page))
+    if status != 200:
+        return None, None
+    root = ET.fromstring(body)
+    ns = "{http://www.xwiki.org}"
+    return (
+        root.findtext(ns + "title") or page,
+        root.findtext(ns + "content") or "",
+        (root.findtext(ns + "hidden") or "false").lower() == "true",
+        root.findtext(ns + "author") or "",
+    )
+
+
+class KnowledgeCategoryLinks(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.href = None
+        self.text = []
+        self.links = []
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "a":
+            self.href = attrs.get("href", "")
+            self.text = []
+
+    def handle_data(self, data):
+        if self.href is not None:
+            self.text.append(data)
+
+    def handle_endtag(self, tag):
+        if tag == "a" and self.href is not None:
+            self.links.append((self.href, "".join(self.text).strip()))
+            self.href = None
+            self.text = []
+
+
+def knowledge_categories(wiki):
+    """Return {category label: nested-space key} from the rendered category index."""
+    status, body = wiki.request("GET", "/bin/view/Knowledge/CategoryIndex")
+    if status != 200:
+        return {}
+    parser = KnowledgeCategoryLinks()
+    parser.feed(body.decode("utf-8", errors="replace"))
+    result = {}
+    for href, label in parser.links:
+        match = re.match(r"^/bin/view/Knowledge/([^/?#]+)/?(?:WebHome)?$", href)
+        if match and label and label not in ("知识库", "文档库", "分类索引", "分类说明"):
+            result[label] = match.group(1)
+    return result
+
+
+def list_page_names(wiki, space):
+    """List direct page names for a space using the XWiki REST API."""
+    path = "/rest/wikis/xwiki/spaces/" + "/spaces/".join(
+        urllib.parse.quote(part, safe="") for part in space.split("/")
+    ) + "/pages"
+    status, body = wiki.request("GET", path)
+    if status != 200:
+        return []
+    root = ET.fromstring(body)
+    ns = "{http://www.xwiki.org}"
+    return [entry.findtext(ns + "name") for entry in root.findall(ns + "pageSummary") if entry.findtext(ns + "name")]
+
+
+def bootstrap_workflow_targets(module, wiki):
+    """Connect existing Knowledge articles to the workflow without moving them.
+
+    Legacy pages predating Publication Workflow don't have workflow metadata, so
+    the extension cannot make an editable draft for them. Add a published-target
+    record to ArticleClass pages and link a same-name Drafts article when present.
+    New pages continue using the normal Start Workflow flow.
+    """
+    categories = knowledge_categories(wiki)
+    module.log(f"discovered Knowledge categories: {len(categories)}")
+    target_refs = {}
+    for label, key in categories.items():
+        space = f"Knowledge/{key}"
+        for page in list_page_names(wiki, space):
+            if not wiki.has_object(space, page, "LuxPedia.Code.ArticleClass"):
+                continue
+            target = f"Knowledge.{key}.{page}"
+            target_refs[(label, page)] = target
+            if not wiki.has_object(space, page, "PublicationWorkflow.PublicationWorkflowClass"):
+                wiki.add_object(space, page, "PublicationWorkflow.PublicationWorkflowClass", {
+                    "status": "published",
+                    "workflow": "LuxPedia.Workflow.Config",
+                    "includeChildren": "0",
+                    "target": target,
+                    "istarget": "1",
+                    "publicationComment": "",
+                })
+                module.log(f"registered existing published article: {target}")
+
+    # Draft articles are intentionally marked hidden, so REST page listings
+    # omit them. Drafts.WebHome is an admin-authored trusted index that links
+    # the pages carrying ArticleClass objects.
+    status, draft_home = wiki.request("GET", "/bin/view/Drafts/WebHome")
+    draft_pages = set()
+    if status == 200:
+        parser = KnowledgeCategoryLinks()
+        parser.feed(draft_home.decode("utf-8", errors="replace"))
+        for href, _ in parser.links:
+            match = re.match(r"^/bin/view/Drafts/([^/?#]+)$", href)
+            if match and match.group(1) != "WebHome":
+                draft_pages.add(match.group(1))
+    for page in sorted(draft_pages):
+        objects = wiki.objects("Drafts", page, "LuxPedia.Code.ArticleClass")
+        if not objects or wiki.has_object("Drafts", page, "PublicationWorkflow.PublicationWorkflowClass"):
+            continue
+        values = wiki.object_values("Drafts", page, "LuxPedia.Code.ArticleClass", objects[0])
+        label = values.get("primaryCategory", "")
+        target = target_refs.get((label, page))
+        if target:
+            wiki.add_object("Drafts", page, "PublicationWorkflow.PublicationWorkflowClass", {
+                "status": "draft",
+                "workflow": "LuxPedia.Workflow.Config",
+                "includeChildren": "0",
+                "target": target,
+                "istarget": "0",
+                "publicationComment": "",
+            })
+            module.log(f"linked existing draft Drafts.{page} -> {target}")
+
+
+def ensure_page_right(wiki, space, page, properties):
+    """Ensure a document-scoped XWikiRights object (not space-scoped GlobalRights)."""
+    class_name = "XWiki.XWikiRights"
+    for number in wiki.objects(space, page, class_name):
+        values = wiki.object_values(space, page, class_name, number)
+        if all(values.get(key, "") == value for key, value in properties.items()):
+            return False
+    wiki.add_object(space, page, class_name, properties)
+    return True
+
+
+def apply(module, wiki):
+    module.log("== workflow configuration")
+    wiki.ensure_page(CONFIG_SPACE, CONFIG_PAGE, "LuxPedia 发布流程配置", CONFIG_CONTENT, hidden=True)
+    wiki.ensure_object_values(CONFIG_SPACE, CONFIG_PAGE, CONFIG_CLASS, CONFIG_VALUES)
+    module.log("== lock LuxPedia configuration/help space")
+    wiki.ensure_page("LuxPedia", "WebPreferences", "WebPreferences", "", hidden=True)
+    wiki.ensure_right("LuxPedia", "WebPreferences", {
+        "groups": "XWiki.LuxManagers", "levels": "view,edit,delete,admin", "allow": "1"})
+    for group in LUXPEDIA_VIEW_ROLES:
+        wiki.ensure_right("LuxPedia", "WebPreferences", {
+            "groups": group, "levels": "view", "allow": "1"})
+        wiki.ensure_right("LuxPedia", "WebPreferences", {
+            "groups": group, "levels": "edit,delete,admin", "allow": "0"})
+    wiki.ensure_right("LuxPedia", "WebPreferences", {
+        "users": "XWiki.XWikiGuest", "levels": "view,comment,edit,delete,admin", "allow": "0"})
+    module.log("== workflow panel in Drafts")
+    wiki.ensure_object_values("Drafts", "WebPreferences", "XWiki.XWikiPreferences", PANEL_VALUES)
+    module.log("== restore editor draft permissions")
+    # The editor ACL had been reduced to view-only, which made all draft edit
+    # pages return 403. Update the existing matching allow rule instead of
+    # accumulating duplicate rights objects.
+    for group, levels, denied in (
+        ("XWiki.LuxEditors", "view,comment,edit", "delete"),
+        ("XWiki.LuxReviewers", "view,comment", "edit,delete"),
+    ):
+        updated = False
+        for number in wiki.objects("Drafts", "WebPreferences", "XWiki.XWikiGlobalRights"):
+            values = wiki.object_values("Drafts", "WebPreferences", "XWiki.XWikiGlobalRights", number)
+            if values.get("groups") == group and values.get("allow") == "1":
+                if values.get("levels") != levels:
+                    wiki.set_object_property("Drafts", "WebPreferences", "XWiki.XWikiGlobalRights", number,
+                                             "levels", levels)
+                    updated = True
+                break
+        else:
+            wiki.ensure_right("Drafts", "WebPreferences", {
+                "groups": group, "levels": levels, "allow": "1"})
+            updated = True
+        wiki.ensure_right("Drafts", "WebPreferences", {
+            "groups": group, "levels": denied, "allow": "0"})
+        module.log(f"{group} draft rights {'restored' if updated else 'unchanged'}")
+
+    module.log("== repair mistakenly started workflow on Drafts home")
+    workflow_numbers = wiki.objects("Drafts", "WebHome", "PublicationWorkflow.PublicationWorkflowClass")
+    for number in workflow_numbers:
+        status, body = wiki.request(
+            "DELETE", wiki.page_path("Drafts", "WebHome") +
+            f"/objects/PublicationWorkflow.PublicationWorkflowClass/{number}",
+            token=wiki.form_token())
+        if status not in (200, 204):
+            raise RuntimeError(f"移除草稿首页误启动的工作流失败: {status} {body[:200]}")
+        module.log("removed accidental workflow from Drafts.WebHome")
+
+    module.log("== protect system-maintained Drafts home")
+    # Remove the earlier incorrectly-scoped GlobalRights rule, which did not
+    # remove the editor's inherited space edit access on this single page.
+    for number in wiki.objects("Drafts", "WebHome", "XWiki.XWikiGlobalRights"):
+        values = wiki.object_values("Drafts", "WebHome", "XWiki.XWikiGlobalRights", number)
+        if values.get("groups") == "XWiki.LuxEditors" and values.get("levels") == "edit" and values.get("allow") == "0":
+            status, body = wiki.request(
+                "DELETE", wiki.page_path("Drafts", "WebHome") + f"/objects/XWiki.XWikiGlobalRights/{number}",
+                token=wiki.form_token())
+            if status not in (200, 204):
+                raise RuntimeError(f"清理错误类型的草稿首页权限失败: {status} {body[:200]}")
+            module.log("removed incorrectly-scoped home-page GlobalRights")
+    if ensure_page_right(wiki, "Drafts", "WebHome", HOME_RIGHTS):
+        module.log("created document-scoped editor denial")
+
+    module.log("== expose pending-review queue")
+    title, content, _, author = read_page(wiki, "Drafts", "WebHome")
+    if title is not None and "PublicationWorkflow.Overview" not in content:
+        if "{{velocity}}" in content:
+            content = content.replace("{{velocity}}", REVIEW_QUEUE_LINK + "\n{{velocity}}", 1)
+        else:
+            content = REVIEW_QUEUE_LINK + "\n" + content
+        wiki.ensure_page("Drafts", "WebHome", title, content, hidden=False, update=True)
+
+    # Replace the legacy script macro. Its content author can remain an editor,
+    # but the built-in Documents macro does not require script rights.
+    title, content, hidden, author = read_page(wiki, "Drafts", "WebHome")
+    if title is not None:
+        content, replacements = re.subn(
+            r"\{\{velocity\}\}.*?\{\{/velocity\}\}",
+            '== 草稿文章 ==\n\n{{documents space="Drafts" count="100" actions="false" columns="doc.title, doc.location"/}}',
+            content,
+            count=1,
+            flags=re.DOTALL,
+        )
+        if replacements or hidden or author != "XWiki.Admin":
+            wiki.ensure_page("Drafts", "WebHome", title, content, hidden=False, update=True)
+    for space, page in (("Drafts", "SampleArticle"), ("Drafts/test", "WebHome")):
+        title, content, hidden, _ = read_page(wiki, space, page)
+        if title is not None and hidden:
+            wiki.ensure_page(space, page, title, content, hidden=False, update=True)
+
+    module.log("== workflow panel on published Knowledge articles")
+    wiki.ensure_object_values("Knowledge", "WebPreferences", "XWiki.XWikiPreferences", PANEL_VALUES)
+    module.log("== connect existing published articles and drafts")
+    bootstrap_workflow_targets(module, wiki)
+    module.log("== editor save-and-submit workflow UX")
+    wiki.ensure_page(UX_SPACE, UX_PAGE, "Workflow UX script", "Automatic destination selection and editor save-and-submit behavior.", hidden=True)
+    wiki.ensure_object_values(UX_SPACE, UX_PAGE, "XWiki.JavaScriptExtension", WORKFLOW_UX_PROPERTIES)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--apply", action="store_true", help="write to XWiki; default is a dry run")
+    parser.add_argument("--base-url", default=os.environ.get("XWIKI_URL", "http://127.0.0.1:8080"))
+    args = parser.parse_args()
+
+    module = load_apply_module()
+    username, password = module.load_admin()
+    wiki = module.XWiki(args.base_url, username, password)
+    status, _ = wiki.request("GET", "/rest/wikis/xwiki")
+    if status != 200:
+        raise SystemExit(f"无法连接 XWiki REST: {args.base_url} ({status})")
+
+    if not args.apply:
+        module.log("dry run: pass --apply to write")
+        module.log(f"target: {args.base_url}")
+        for key, value in CONFIG_VALUES.items():
+            module.log(f"  {key} = {value}")
+        module.log("  Drafts.WebPreferences rightPanels = PublicationWorkflow.PublicationWorkflowPanel")
+        module.log("  Drafts editors: view, comment, edit")
+        module.log("  Drafts.WebHome: document-scoped editor edit denial (system-maintained index)")
+        return
+
+    apply(module, wiki)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        raise

@@ -1,5 +1,15 @@
 # 变更记录
 
+## 未发布（2026-11-17）
+
+- 配置两角色 Publication Workflow：编辑者提交审核，审核人发布到 Knowledge。
+- 编辑者在 CKEditor 中使用“保存并提交审核”；管理员仍保留普通 Done/Save。
+- 新草稿按文章主分类自动选择 Knowledge 发布目标；既有 Knowledge 文章通过 Go to draft 维护原目标路径。
+- 草稿首页增加待审核队列入口；待审状态明确显示“待审核，尚未发布”，修复 hidden 草稿未出现在审核列表的问题。
+- 限制 LuxPedia 产品/配置空间为管理员可编辑；新草稿可在保存提交前选择 Knowledge 分类，既有工作流草稿保留原位置。
+- 修复 Drafts 编辑权限；草稿首页改用内置 Documents 宏，避免 Velocity 脚本权限错误。
+- 增加幂等工作流初始化脚本 `scripts/apply_workflow.py`，浏览器端到端验证和 14 项 Sprint 1 烟测通过。
+
 ## v0.2.0 — 2026-11-16
 
 - 建立管理、编辑者、审核人、读者四类组和空间级权限矩阵。
