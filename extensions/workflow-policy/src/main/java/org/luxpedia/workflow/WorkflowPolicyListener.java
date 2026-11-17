@@ -17,6 +17,7 @@ import org.xwiki.bridge.event.DocumentDeletingEvent;
 import org.xwiki.component.annotation.Component;
 import org.xwiki.model.reference.DocumentReference;
 import org.xwiki.model.reference.DocumentReferenceResolver;
+import org.xwiki.model.reference.WikiReference;
 import org.xwiki.observation.EventListener;
 import org.xwiki.observation.event.CancelableEvent;
 import org.xwiki.observation.event.Event;
@@ -299,8 +300,13 @@ public class WorkflowPolicyListener implements EventListener
             "where wf.istarget = 0 and (doc.space = 'Drafts' or doc.space like 'Drafts.%')", Query.XWQL)
             .setWiki(context.getWikiId()).execute();
         int repaired = 0;
+        WikiReference wikiReference = new WikiReference(context.getWikiId());
         for (String name : drafts) {
-            XWikiDocument original = context.getWiki().getDocument(resolver.resolve(name), context);
+            DocumentReference reference = resolver.resolve(name, wikiReference);
+            require(reference.getWikiReference().equals(wikiReference) &&
+                reference.getSpaceReferences().get(0).getName().equals("Drafts"),
+                "Draft permission migration must stay within the current wiki's Drafts space.");
+            XWikiDocument original = context.getWiki().getDocument(reference, context);
             XWikiDocument draft = original.clone();
             normalizeDraftRights(draft, status(draft.getObject(WF)), context);
             draft.setHidden(false);

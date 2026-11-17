@@ -80,3 +80,7 @@ npm run test:ui
 如果容器里已有 JAR，而 `PolicyStatus` 页面显示 `The execution of the [groovy] script macro is not allowed`，这是旧安装器依赖 Groovy 编程权限导致的检测失败，并不代表 JAR 不存在。更新本分支后，重新打包 JAR、构建镜像并重建 XWiki 容器，使新增的 `luxpediaWorkflowPolicy` 管理服务加载，再运行 Python 配置脚本。仅更新 Python 文件或重启旧镜像不足以加载新服务；不需要为编辑者、审核人或读者开放脚本或编程权限。
 
 例如本地端口为 8081 时，配置命令是 `python3 scripts/apply_workflow.py --base-url http://127.0.0.1:8081 --apply`。
+
+### 初始化报 `The resolver parameter doesn't contain an Entity Reference of type [WIKI]`
+
+旧版本修复历史草稿 ACL 时，用显式解析器处理 `Drafts.文章名.WebHome` 一类查询结果，却遗漏了当前 Wiki 参数。新版显式传入 `WikiReference`，并校验迁移范围仍在当前 Wiki 的 Drafts 内；真实解析器回归覆盖嵌套页面、转义名称及非默认 Wiki。这项修复属于 Java 组件，需要更新代码、重新打包 JAR、重建镜像并重建 XWiki 容器后，再运行配置脚本。

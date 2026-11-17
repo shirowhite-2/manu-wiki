@@ -10,6 +10,11 @@ import org.junit.jupiter.api.Test;
 import org.xwiki.bridge.event.DocumentUpdatingEvent;
 import org.xwiki.model.reference.DocumentReference;
 import org.xwiki.model.reference.DocumentReferenceResolver;
+import org.xwiki.model.reference.WikiReference;
+import org.xwiki.model.internal.reference.ExplicitStringDocumentReferenceResolver;
+import org.xwiki.model.internal.reference.ExplicitStringEntityReferenceResolver;
+import org.xwiki.model.internal.reference.AbstractStringEntityReferenceResolver;
+import org.xwiki.model.internal.reference.DefaultSymbolScheme;
 import org.xwiki.observation.event.CancelableEvent;
 import org.xwiki.security.authorization.AuthorizationManager;
 import org.xwiki.security.authorization.Right;
@@ -48,6 +53,18 @@ class WorkflowPolicyListenerTest {
         List<String> parts = new ArrayList<>(List.of(local.split("\\.")));
         String name = parts.remove(parts.size() - 1);
         return new DocumentReference("xwiki", parts, name);
+    }
+    DocumentReferenceResolver<String> realResolver() throws Exception {
+        var entities = new ExplicitStringEntityReferenceResolver();
+        var scheme = AbstractStringEntityReferenceResolver.class.getDeclaredField("symbolScheme");
+        scheme.setAccessible(true);
+        scheme.set(entities, new DefaultSymbolScheme());
+        entities.initialize();
+        var documents = new ExplicitStringDocumentReferenceResolver();
+        var field = ExplicitStringDocumentReferenceResolver.class.getDeclaredField("entityReferenceResolver");
+        field.setAccessible(true);
+        field.set(documents, entities);
+        return documents;
     }
     BaseObject object(String state) {
         BaseObject result = mock(BaseObject.class);
@@ -316,7 +333,7 @@ class WorkflowPolicyListenerTest {
         Query query = mock(Query.class, RETURNS_SELF);
         when(policy.queries.createQuery(anyString(), eq(Query.XWQL))).thenReturn(query);
         when(query.execute()).thenReturn(List.of("Drafts.Article.WebHome"));
-        when(policy.resolver.resolve("Drafts.Article.WebHome")).thenReturn(ref("Drafts.Article.WebHome"));
+        policy.resolver = realResolver();
         when(old.clone()).thenReturn(doc);
         when(old.getContentAuthorReference()).thenReturn(ref("XWiki.originalAuthor"));
         states("validating", "validating");
@@ -329,5 +346,33 @@ class WorkflowPolicyListenerTest {
         group("Reviewers"); policy.operation = "validate"; states("validating", "valid"); audit(old, "anotherEditor");
         when(old.getObject(WorkflowPolicyListener.AUDIT).getStringValue("authoredBy")).thenReturn(user.toString());
         assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
+    }
+    @Test void explicitResolverRequiresWikiForUnprefixedQueryResults() throws Exception {
+        var resolver = realResolver();
+        var failure = assertThrows(IllegalArgumentException.class, () -> resolver.resolve("Drafts.Article.WebHome"));
+        assertTrue(failure.getMessage().contains("[WIKI]"));
+        assertEquals(new DocumentReference("secondary", List.of("Drafts", "Part.One"), "WebHome"),
+            resolver.resolve("Drafts.Part\\.One.WebHome", new WikiReference("secondary")));
+    }
+    @Test void rightsMigrationUsesActiveWikiAndRealReferenceResolution() throws Exception {
+        when(context.getWikiId()).thenReturn("secondary");
+        when(policy.authorization.hasAccess(eq(Right.ADMIN), eq(user), any())).thenReturn(true);
+        policy.resolver = realResolver();
+        policy.queries = mock(QueryManager.class);
+        Query query = mock(Query.class, RETURNS_SELF);
+        when(policy.queries.createQuery(anyString(), eq(Query.XWQL))).thenReturn(query);
+        when(query.execute()).thenReturn(List.of("Drafts.Part\\.One.WebHome"));
+        DocumentReference expected = new DocumentReference("secondary", List.of("Drafts", "Part.One"), "WebHome");
+        XWikiDocument original = mock(XWikiDocument.class), draft = mock(XWikiDocument.class);
+        when(wiki.getDocument(expected, context)).thenReturn(original);
+        when(original.clone()).thenReturn(draft);
+        when(draft.getDocumentReference()).thenReturn(expected);
+        BaseObject flow = object("draft");
+        when(draft.getObject(WorkflowPolicyListener.WF)).thenReturn(flow);
+        when(draft.newXObject(any(DocumentReference.class), eq(context))).thenAnswer(invocation -> mock(BaseObject.class));
+        assertEquals(1, policy.repairExistingDraftRights(context));
+        verify(query).setWiki("secondary");
+        verify(wiki).getDocument(expected, context);
+        verify(draft, atLeastOnce()).newXObject(new DocumentReference("secondary", "XWiki", "XWikiRights"), context);
     }
 }
