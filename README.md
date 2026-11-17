@@ -38,6 +38,7 @@ python3 tests/sprint1_smoke.py
 - [部署、启动、备份和恢复](docs/deployment.md)
 - [账号、权限、编辑、附件和模板](docs/usage.md)
 - [Publication Workflow 配置与实际记录](docs/workflow.md)
+- [角色越权检查、英文/中文界面与服务端组件部署](docs/roles-and-interface.md)
 - [AI 版本、模型接口、索引与权限方案](docs/ai.md)
 - [Office 引擎和连接器源码构建调研](docs/office.md)
 - [组件、版本、许可证与费用](docs/components.md)

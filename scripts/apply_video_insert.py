@@ -17,10 +17,13 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+from interface_assets import I18N_JS
 SPACE = "LuxPedia/Code"
 PAGE = "VideoInsertScript"
 
-VIDEO_INSERT_JS = r"""(function () {
+VIDEO_INSERT_JS = I18N_JS + r"""(function () {
+  var t = window.LuxPediaI18n.t;
   var BAR_ID = 'luxpedia-video-bar';
   var VIDEO = /\.(mp4|mov|avi|webm|ogv|m4v)$/i;
 
@@ -44,26 +47,30 @@ VIDEO_INSERT_JS = r"""(function () {
     bar.setAttribute('style', 'margin:8px 0;padding:8px 10px;background:#f5f7fa;border:1px solid #d9dee7;border-radius:4px;font-size:14px;line-height:2;');
 
     var label = document.createElement('strong');
-    label.textContent = '插入视频：';
+    label.textContent = t('insertVideo');
+    label.dataset.luxpediaI18n = 'insertVideo';
 
     var select = document.createElement('select');
     select.id = 'luxpedia-video-select';
     select.setAttribute('style', 'min-width:16em;margin:0 6px;');
     var placeholder = document.createElement('option');
     placeholder.value = '';
-    placeholder.textContent = '正在读取视频附件…';
+    placeholder.textContent = t('loadingVideos');
+    placeholder.dataset.luxpediaI18n = 'loadingVideos';
     select.appendChild(placeholder);
 
     var button = document.createElement('button');
     button.type = 'button';
     button.id = 'luxpedia-video-insert';
     button.className = 'btn btn-primary';
-    button.textContent = '插入到正文';
+    button.textContent = t('insertIntoArticle');
+    button.dataset.luxpediaI18n = 'insertIntoArticle';
     button.disabled = true;
 
     var hint = document.createElement('span');
     hint.setAttribute('style', 'color:#666;margin-left:8px;');
-    hint.textContent = '视频需先在附件面板上传（.mp4、.webm 等）。插入后点击 Done 保存，阅读模式即可播放。';
+    hint.textContent = t('videoHint');
+    hint.dataset.luxpediaI18n = 'videoHint';
 
     bar.appendChild(label);
     bar.appendChild(select);
@@ -80,7 +87,8 @@ VIDEO_INSERT_JS = r"""(function () {
         if (names.length === 0) {
           var none = document.createElement('option');
           none.value = '';
-          none.textContent = '（本页没有视频附件）';
+          none.textContent = t('noVideos');
+    none.dataset.luxpediaI18n = 'noVideos';
           select.appendChild(none);
           return;
         }
@@ -96,7 +104,8 @@ VIDEO_INSERT_JS = r"""(function () {
         select.innerHTML = '';
         var err = document.createElement('option');
         err.value = '';
-        err.textContent = '无法读取附件列表';
+        err.textContent = t('attachmentError');
+    err.dataset.luxpediaI18n = 'attachmentError';
         select.appendChild(err);
       });
 

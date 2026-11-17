@@ -1,0 +1,13 @@
+{{velocity}}
+#set($o = $doc.getObject("LuxPedia.Code.ArticleClass"))
+#if($o)
+|=字段|=值
+|主分类|$!o.getProperty("primaryCategory").value
+|状态|$!o.getProperty("status").value
+|负责人|$!o.getProperty("owner").value
+|适用版本|$!o.getProperty("applicableVersion").value
+|标签|$!o.getProperty("tagsText").value
+|摘要|$!o.getProperty("summary").value
+#end
+{{/velocity}}
+

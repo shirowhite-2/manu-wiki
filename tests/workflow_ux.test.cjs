@@ -1,0 +1,313 @@
+// Browser regression checks for the generated XWiki extension.
+// Run: node --test tests/workflow_ux.test.cjs (requires Playwright + Chromium).
+// Routes model the upstream workflow forms/redirects; no live wiki is changed.
+const assert = require('node:assert/strict');
+const { test, before, after } = require('node:test');
+const { spawnSync } = require('node:child_process');
+const path = require('node:path');
+const http = require('node:http');
+const { chromium } = require('playwright');
+
+const source = process.env.WORKFLOW_UX_SOURCE || path.join(__dirname, '../scripts/apply_workflow.py');
+const extracted = spawnSync('python3', ['-c',
+  'import runpy, sys; print(runpy.run_path(sys.argv[1])["WORKFLOW_UX_JS"])', source], { encoding: 'utf8' });
+assert.equal(extracted.status, 0, extracted.stderr);
+const ux = extracted.stdout;
+const prefix = 'luxpedia.workflow.submit.';
+let browser;
+before(async () => { browser = await chromium.launch({
+  headless: true, executablePath: process.env.CHROMIUM_EXECUTABLE_PATH || undefined,
+}); });
+after(async () => { await browser?.close(); });
+
+async function wikiFixture(options = {}) {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  const reference = options.reference || 'Drafts.NewArticle.WebHome';
+  const viewPath = '/bin/view/' + reference.split('.').join('/');
+  const editPath = viewPath.replace('/view/', '/edit/');
+  const pendingKey = prefix + reference;
+  const state = {
+    status: options.status || (options.linkedTarget ? 'draft' : ''),
+    target: options.linkedTarget || '',
+    category: options.primaryCategory || '',
+    hasArticle: options.hasArticle !== false,
+    actions: [], alerts: [], errors: [],
+  };
+  page.on('pageerror', error => state.errors.push(error.message));
+  page.on('dialog', async dialog => { state.alerts.push(dialog.message()); await dialog.accept(); });
+  function form(action, fields = '') {
+    return `<form method="post" action="/bin/view/PublicationWorkflow/Script">
+      <input name="action" type="hidden" value="${action}">
+      <input name="workflowdoc" type="hidden" value="${reference}">
+      ${fields}<input type="submit" value="Continue"></form>`;
+  }
+  function html(edit) {
+    const start = form('start', `<input name="targetSpace" value="Drafts">
+      <input name="targetName" value="WebHome">
+      <input name="targetIsTerminal" type="checkbox">
+      <input name="includeChildren" type="checkbox" checked>
+      <input name="startAsTarget" type="checkbox">
+      <select name="workflow"><option value="LuxPedia.Workflow.Config">LuxPedia 发布流程配置</option></select>`);
+    const workflow = !state.status ? start : state.status === 'draft' ? form('submitformoderation') :
+      state.status === 'validating' ? form('publish') + form('validate') + form('refusevalidation') + form('archive') :
+      state.status === 'published' ? form('getEditableDraft') + form('archive') + form('unpublish') : '';
+    return `<!doctype html><meta name="document" content="${reference}">
+      <div data-xwiki-form-token="test-token"></div>
+      <a id="tmUser" href="/bin/view/XWiki/${options.admin ? 'Admin' : 'editor'}">Profile</a>
+      <div id="document-title"><h1>New article</h1></div>
+      ${edit ? `<div><textarea id="xwikieditor"></textarea></div>
+        <button class="realtime-action-done" onclick="location.href='${viewPath}'">Done</button>` : '<div class="panel"><h2 class="panel-title">Workflow</h2><div class="publicationworkflow-info">' + workflow + '</div></div>'}
+      <div id="xwikicontent"><article id="user-content">用户撰写的正文 stays unchanged.</article></div>
+      <script>${ux}</script>`;
+  }
+  async function handle(route) {
+    const request = route.request();
+    const url = new URL(request.url());
+    const pathname = decodeURIComponent(url.pathname);
+    const json = body => route.fulfill({ json: body });
+    if (pathname.endsWith('/PublicationWorkflow/Script')) {
+      const fields = Object.fromEntries(new URLSearchParams(request.postData()));
+      state.actions.push(fields);
+      let query = '';
+      if (fields.action === 'start') {
+        state.target = fields.targetSpace + '.' + fields.targetName +
+          (fields.targetIsTerminal ? '' : '.WebHome');
+        // A category homepage exists before any article is submitted.
+        if (['Knowledge.Technical.WebHome', 'Knowledge.Operations.WebHome', options.collision]
+          .includes(state.target)) {
+          query = '?targetexists=true';
+        } else {
+          state.status = 'draft';
+        }
+      } else if (fields.action === 'submitformoderation') {
+        assert.equal(state.status, 'draft');
+        state.status = 'validating'; // two-role config has no moderator
+      }
+      return route.fulfill({ status: 303, headers: { location: viewPath + query }, body: '' });
+    }
+    if (pathname === '/bin/view/Knowledge/CategoryIndex') {
+      return route.fulfill({ contentType: 'text/html', body:
+        '<a href="/bin/view/Knowledge/Technical/WebHome">技术文档</a>' +
+        '<a href="/bin/view/Knowledge/Operations/WebHome">操作手册</a>' });
+    }
+    if (pathname.startsWith('/rest/')) {
+      if (pathname.includes('/objects/XWiki.XWikiGroups')) {
+        const editorGroup = pathname.includes('/pages/LuxEditors/') && !['reviewer', 'reader'].includes(options.role) ||
+          pathname.includes('/pages/LuxReviewers/') && options.role === 'reviewer';
+        return json(pathname.endsWith('/properties/member') ? { value: 'XWiki.editor' } :
+          { objectSummaries: editorGroup ? [{ number: 0 }] : [] });
+      }
+      if (pathname.includes('/objects/PublicationWorkflow.PublicationWorkflowClass')) {
+        if (pathname.endsWith('/properties/status')) { return json({ value: state.status }); }
+        if (pathname.endsWith('/properties/target')) { return json({ value: state.target }); }
+        return json({ objectSummaries: state.status ? [{ number: 0 }] : [] });
+      }
+      if (pathname.endsWith('/objects') && request.method() === 'POST') {
+        const fields = new URLSearchParams(request.postData());
+        state.hasArticle = true;
+        state.category = fields.get('property#primaryCategory');
+        return json({});
+      }
+      if (pathname.includes('/objects/LuxPedia.Code.ArticleClass')) {
+        if (pathname.endsWith('/properties')) {
+          return json({ properties: [
+            { name: 'primaryCategory', value: state.category }, { name: 'owner', value: 'XWiki.editor' },
+            { name: 'status', value: 'draft' }, { name: 'summary', value: '<script>user data</script>' },
+          ] });
+        }
+        if (pathname.endsWith('/properties/primaryCategory')) {
+          if (request.method() === 'PUT') { state.category = request.postData(); }
+          return json({ value: state.category });
+        }
+        return json({ objectSummaries: state.hasArticle ? [{ number: 0 }] : [] });
+      }
+      throw new Error('Unexpected REST request: ' + pathname);
+    }
+    return route.fulfill({ contentType: 'text/html', body: html(pathname === editPath) });
+  }
+  // A real local server exercises native POST/303 navigations as well as REST.
+  const server = http.createServer(async (request, response) => {
+    let body = '';
+    for await (const chunk of request) { body += chunk; }
+    try {
+      await handle({
+        request: () => ({ url: () => origin + request.url,
+          method: () => request.method, postData: () => body }),
+        fulfill: async result => {
+          response.writeHead(result.status || 200, { ...result.headers,
+            'Content-Type': (result.json ? 'application/json' : result.contentType || 'text/plain') + '; charset=utf-8' });
+          response.end(result.json ? JSON.stringify(result.json) : result.body || '');
+        },
+      });
+    } catch (error) {
+      state.errors.push(error.message);
+      response.writeHead(500);
+      response.end(error.message);
+    }
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = 'http://127.0.0.1:' + server.address().port;
+  context.on('close', () => server.close());
+  async function submit(category) {
+    await page.goto(origin + editPath);
+    if (!options.linkedTarget) {
+      await page.locator('#luxpedia-publish-category').waitFor();
+      if (category !== undefined) { await page.selectOption('#luxpedia-publish-category', category); }
+    } else {
+      await page.locator('#luxpedia-category-choice').waitFor();
+      assert.equal(await page.locator('#luxpedia-publish-category').count(), 0);
+    }
+    await page.waitForFunction(() => document.querySelector('.realtime-action-done')
+      ?.getAttribute('data-luxpedia-submit-bound') === '1');
+    await page.locator('.realtime-action-done').click();
+  }
+  async function expectPending(target) {
+    try {
+      await page.waitForFunction(key => sessionStorage.getItem(key) === null,
+        pendingKey, { timeout: 7000 });
+    } catch (error) {
+      throw new Error(JSON.stringify({ ...state, actions: state.actions.slice(0, 2),
+        actionCount: state.actions.length, url: page.url() }), { cause: error });
+    }
+    assert.deepEqual(state.alerts, []);
+    assert.deepEqual(state.errors, []);
+    assert.equal(state.status, 'validating');
+    assert.equal(state.target, target);
+    assert.equal(await page.evaluate(key => sessionStorage.getItem(key + '.category'), pendingKey), null);
+    const start = state.actions.find(action => action.action === 'start');
+    if (start) {
+      assert.equal(start.targetIsTerminal, 'on');
+      assert.equal(start.includeChildren, undefined);
+      assert.equal(start.startAsTarget, undefined);
+      assert.equal(start.workflow, 'LuxPedia.Workflow.Config');
+    }
+  }
+  return { context, page, state, submit, expectPending, pendingKey, origin };
+}
+
+for (const scenario of [
+  { name: 'normal nested page uses its article name in the selected category',
+    primaryCategory: '操作手册', category: 'Technical', target: 'Knowledge.Technical.NewArticle' },
+  { name: 'plain nested page creates ArticleClass metadata before submitting',
+    hasArticle: false, category: 'Technical', target: 'Knowledge.Technical.NewArticle' },
+  { name: 'terminal page keeps its name', reference: 'Drafts.TerminalArticle',
+    category: 'Technical', target: 'Knowledge.Technical.TerminalArticle' },
+  { name: 'second nested article does not collide with the category homepage',
+    reference: 'Drafts.OtherArticle.WebHome', category: 'Technical', target: 'Knowledge.Technical.OtherArticle' },
+  { name: 'explicit root choice overrides the source category',
+    reference: 'Drafts.Operations.NewArticle.WebHome', primaryCategory: '操作手册',
+    category: '__root__', target: 'Knowledge.NewArticle' },
+  { name: 'source category inference excludes the article container',
+    reference: 'Drafts.Technical.NewArticle.WebHome', target: 'Knowledge.Technical.NewArticle' },
+  { name: 'primary category supplies the default selection',
+    primaryCategory: '技术文档', target: 'Knowledge.Technical.NewArticle' },
+  { name: 'linked published article keeps the exact original target',
+    linkedTarget: 'Knowledge.Operations.Existing.WebHome', target: 'Knowledge.Operations.Existing.WebHome' },
+]) {
+  test(scenario.name, async () => {
+    const wiki = await wikiFixture(scenario);
+    try {
+      await wiki.submit(scenario.category);
+      await wiki.expectPending(scenario.target);
+      assert.deepEqual(wiki.state.actions.map(item => item.action), scenario.linkedTarget ?
+        ['submitformoderation'] : ['start', 'submitformoderation']);
+      if (scenario.category === 'Technical') { assert.equal(wiki.state.category, '技术文档'); }
+    } finally { await wiki.context.close(); }
+  });
+}
+
+test('existing target reports submission failure and stops retrying', async () => {
+  const wiki = await wikiFixture({ collision: 'Knowledge.Technical.NewArticle' });
+  try {
+    await wiki.submit('Technical');
+    await wiki.page.waitForFunction(key => sessionStorage.getItem(key) === null,
+      wiki.pendingKey, { timeout: 7000 });
+    assert.equal(wiki.state.status, '');
+    assert.equal(wiki.state.actions.length, 1);
+    assert.equal(wiki.state.alerts.length, 1);
+    assert.match(wiki.state.alerts[0], /was not submitted for review/);
+  } finally { await wiki.context.close(); }
+});
+
+test('administrator keeps the standard Done button', async () => {
+  const wiki = await wikiFixture({ admin: true });
+  try {
+    const rolesChecked = wiki.page.waitForResponse(response => response.url().includes('/pages/XWikiAdminGroup/objects/'));
+    await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
+    // Wait until boot has performed its role checks.
+    await rolesChecked;
+    assert.equal(await wiki.page.locator('.realtime-action-done').textContent(), 'Done');
+    assert.equal(await wiki.page.locator('#luxpedia-publish-category').count(), 0);
+    assert.equal(wiki.state.actions.length, 0);
+  } finally { await wiki.context.close(); }
+});
+
+test('English is the default and the panel explains the review step', async () => {
+  const wiki = await wikiFixture({ status: 'validating', linkedTarget: 'Knowledge.Technical.Article', role: 'reviewer' });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/view/Drafts/NewArticle/WebHome');
+    await wiki.page.waitForFunction(() => document.querySelector('.luxpedia-state')?.textContent === 'Awaiting review');
+    assert.equal(await wiki.page.locator('#luxpedia-language-select').inputValue(), 'en');
+    assert.match(await wiki.page.locator('.luxpedia-next').textContent(), /submitted version is locked/);
+    assert.match(await wiki.page.locator('.luxpedia-workflow-summary dd').textContent(), /Knowledge.*Technical.*Article/);
+    assert.equal(await wiki.page.locator('form:has(input[value="publish"]) input[type="submit"]').inputValue(), 'Approve and publish');
+    await wiki.page.waitForFunction(() => document.querySelector('form:has(input[value="archive"])')?.hidden === true);
+    if (process.env.WORKFLOW_SCREENSHOTS_DIR) {
+      await wiki.page.screenshot({ path: path.join(process.env.WORKFLOW_SCREENSHOTS_DIR, 'workflow-en.png') });
+    }
+  } finally { await wiki.context.close(); }
+});
+
+test('Chinese selection persists across navigation and leaves article content intact', async () => {
+  const wiki = await wikiFixture({ status: 'validating', linkedTarget: 'Knowledge.Technical.Article', role: 'reviewer' });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/view/Drafts/NewArticle/WebHome');
+    const before = await wiki.page.locator('#user-content').textContent();
+    await wiki.page.selectOption('#luxpedia-language-select', 'zh');
+    await wiki.page.waitForURL(/xwikilanguage=zh/);
+    await wiki.page.waitForFunction(() => document.querySelector('.luxpedia-state')?.textContent === '待审核');
+    assert.equal(await wiki.page.locator('#user-content').textContent(), before);
+    assert.equal(await wiki.page.locator('#luxpedia-article-metadata tr[data-field="status"] td').textContent(), '待审核');
+    assert.equal(await wiki.page.locator('#luxpedia-article-metadata tr[data-field="summary"] td').textContent(), '<script>user data</script>');
+    assert.equal(await wiki.page.locator('form:has(input[value="publish"]) input[type="submit"]').inputValue(), '批准并发布');
+    await wiki.page.goto(wiki.origin + '/bin/view/Drafts/NewArticle/WebHome');
+    assert.equal(await wiki.page.locator('#luxpedia-language-select').inputValue(), 'zh');
+    await wiki.page.waitForFunction(() => document.querySelector('.luxpedia-state')?.textContent === '待审核');
+    if (process.env.WORKFLOW_SCREENSHOTS_DIR) {
+      await wiki.page.screenshot({ path: path.join(process.env.WORKFLOW_SCREENSHOTS_DIR, 'workflow-zh.png') });
+    }
+    await wiki.page.selectOption('#luxpedia-language-select', 'en');
+    await wiki.page.waitForURL(/xwikilanguage=en/);
+    await wiki.page.waitForFunction(() => document.querySelector('.luxpedia-state')?.textContent === 'Awaiting review');
+  } finally { await wiki.context.close(); }
+});
+
+test('language switching in the editor preserves unsaved text and the selected category', async () => {
+  const wiki = await wikiFixture();
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
+    await wiki.page.locator('#luxpedia-publish-category').waitFor();
+    await wiki.page.fill('#xwikieditor', 'Unsaved text 未保存的正文');
+    await wiki.page.selectOption('#luxpedia-publish-category', 'Technical');
+    const url = wiki.page.url();
+    await wiki.page.selectOption('#luxpedia-language-select', 'zh');
+    assert.equal(wiki.page.url(), url);
+    assert.equal(await wiki.page.locator('#xwikieditor').inputValue(), 'Unsaved text 未保存的正文');
+    assert.equal(await wiki.page.locator('#luxpedia-publish-category').inputValue(), 'Technical');
+    assert.equal(await wiki.page.locator('.realtime-action-done').textContent(), '保存并提交审核');
+    await wiki.page.locator('.realtime-action-done').click();
+    await wiki.expectPending('Knowledge.Technical.NewArticle');
+  } finally { await wiki.context.close(); }
+});
+
+test('reviewer cannot see author or administrator workflow actions', async () => {
+  const wiki = await wikiFixture({ status: 'published', linkedTarget: 'Knowledge.Technical.Article', role: 'reviewer' });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/view/Drafts/NewArticle/WebHome');
+    await wiki.page.waitForFunction(() => document.querySelector('form:has(input[value="getEditableDraft"])')?.hidden === true);
+    for (const action of ['getEditableDraft', 'archive', 'unpublish']) {
+      assert.equal(await wiki.page.locator('form:has(input[value="' + action + '"])').isVisible(), false);
+    }
+  } finally { await wiki.context.close(); }
+});

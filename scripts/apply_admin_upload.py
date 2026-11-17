@@ -17,6 +17,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+from interface_assets import I18N_JS
 # The admin form reads its object from the configurable's own document, and
 # upload_maxsize is the wiki-wide value on XWiki.XWikiPreferences (used by all
 # spaces such as Drafts and Knowledge). Registration therefore lives there.
@@ -34,7 +36,7 @@ CONFIG_PROPERTIES = {
     "displayBeforeCategory": "",
     "displayInCategory": "content",
     "displayInSection": "attachmentsrestriction",
-    "heading": "附件上传上限（MB）",
+    "heading": "Attachment upload limit (MB)",
     "iconAttachment": "",
     "linkPrefix": "",
     "propertiesToShow": "upload_maxsize",
@@ -49,7 +51,8 @@ def load_apply_module():
     return module
 
 
-UPLOAD_LIMIT_JS = """(function () {
+UPLOAD_LIMIT_JS = I18N_JS + """(function () {
+  var t = window.LuxPediaI18n.t;
   var FIELD = 'XWiki.XWikiPreferences_0_upload_maxsize';
   var MB = 1048576;
   function init() {
@@ -68,7 +71,8 @@ UPLOAD_LIMIT_JS = """(function () {
     mbInput.style.display = 'inline-block';
     mbInput.value = current > 0 ? String(Math.round(current / MB)) : '32';
     var unit = document.createElement('span');
-    unit.textContent = ' MB（保存时自动换算为字节）';
+    unit.textContent = t('uploadUnit');
+    unit.dataset.luxpediaI18n = 'uploadUnit';
     input.type = 'hidden';
     input.parentNode.insertBefore(mbInput, input);
     input.parentNode.insertBefore(unit, input.nextSibling);
@@ -82,7 +86,7 @@ UPLOAD_LIMIT_JS = """(function () {
       form.addEventListener('submit', function (event) {
         if (!sync()) {
           event.preventDefault();
-          window.alert('请输入 1 到 99999 之间的整数（单位 MB）。');
+          window.alert(t('uploadInvalid'));
         }
       });
     }

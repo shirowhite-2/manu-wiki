@@ -1,0 +1,7 @@
+services:
+  xwiki:
+    image: manu-wiki-xwiki-policy:17.10.15-1
+    build:
+      context: ./extensions/workflow-policy
+      args:
+        XWIKI_IMAGE: ${XWIKI_IMAGE:-xwiki:17.10.15-postgres-tomcat}

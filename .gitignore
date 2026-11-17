@@ -7,3 +7,5 @@ __pycache__/
 .superpowers/
 
 compose.cloud.yaml
+extensions/*/target/
+node_modules/

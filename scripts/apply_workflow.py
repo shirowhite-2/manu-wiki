@@ -22,6 +22,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+from interface_assets import I18N_JS, UI
 CONFIG_SPACE = "LuxPedia/Workflow"
 CONFIG_PAGE = "Config"
 CONFIG_CLASS = "PublicationWorkflow.PublicationWorkflowConfigClass"
@@ -58,42 +60,11 @@ WORKFLOW_UX_JS = r"""(function () {
   var CLASS = 'PublicationWorkflow.PublicationWorkflowClass';
   var ARTICLE_CLASS = 'LuxPedia.Code.ArticleClass';
   var REST = '/rest/wikis/xwiki/';
-var busy = false;
+  var busy = false;
+  var t = window.LuxPediaI18n.t;
+  var uiRoles = null;
 
-  function translateWorkflowUI() {
-    var statusMap = {
-      'Current status: Draft': '当前状态：草稿（未提交）',
-      'Current status: Currently being moderated': '当前状态：待初审',
-      'Current status: Currently being validated': '当前状态：待审核，尚未发布',
-      'Current status: Valid': '当前状态：审核通过，待发布',
-      'Current status: Published': '当前状态：已发布',
-      'Current status: Archived': '当前状态：已归档'
-    };
-    document.querySelectorAll('.publicationworkflow-info p').forEach(function (node) {
-      var value = node.textContent.trim();
-      if (statusMap[value]) { node.textContent = statusMap[value]; }
-    });
-    document.querySelectorAll('.publicationworkflow-info input[type="submit"], .publicationworkflow-info button')
-      .forEach(function (button) {
-        var value = (button.value || button.textContent || '').trim();
-        var labels = {
-          'Publish': '审核通过并发布',
-          'Validate without publishing': '审核通过（暂不发布）',
-          'Refuse': '退回修改',
-          'Submit to moderation': '提交审核',
-          'Submit for validation': '提交审核',
-          'Start workflow': '启动审批流程',
-          'Go to draft': '打开修改草稿'
-        };
-        if (labels[value]) {
-          if (button.tagName === 'INPUT') { button.value = labels[value]; }
-          else { button.textContent = labels[value]; }
-        }
-      });
-    document.querySelectorAll('h1,h2,h3,.panel-title,.panel-heading').forEach(function (node) {
-      if (node.textContent.trim() === 'Workflow') { node.textContent = '审批流程'; }
-    });
-  }
+  /* LUXPEDIA_WORKFLOW_PANEL */
 
   function documentReference() {
     var meta = document.querySelector('meta[name="document"]');
@@ -101,14 +72,11 @@ var busy = false;
   }
 
   function currentUser() {
-    var links = Array.from(document.querySelectorAll('a[href*="/bin/view/XWiki/"]'));
-    for (var i = 0; i < links.length; i++) {
-      var match = links[i].getAttribute('href').match(/\/bin\/view\/XWiki\/([^/?#]+)/);
-      if (match && !['XWikiUsers', 'XWikiGroups'].includes(match[1])) {
-        return 'XWiki.' + decodeURIComponent(match[1]);
-      }
-    }
-    return '';
+    var user = window.XWiki && window.XWiki.currentUser;
+    if (user) { return user.replace(/^xwiki:/, ''); }
+    var link = document.querySelector('#tmUser a[href*="/bin/view/XWiki/"], #tmUser[href*="/bin/view/XWiki/"]');
+    var match = link && link.getAttribute('href').match(/\/bin\/view\/XWiki\/([^/?#]+)/);
+    return match ? 'XWiki.' + decodeURIComponent(match[1]) : '';
   }
 
   function restSpaces(reference) {
@@ -127,14 +95,21 @@ var busy = false;
       });
   }
 
-  function groupHasMember(group, user) {
+  function groupHasMember(group, user, visited) {
+    visited = new Set(visited || []);
+    if (visited.has(group)) { return Promise.resolve(false); }
+    visited.add(group);
     var path = 'spaces/XWiki/pages/' + encodeURIComponent(group) + '/objects/XWiki.XWikiGroups';
     return getJson(path).then(function (data) {
       var objects = data.objectSummaries || [];
       return Promise.all(objects.map(function (object) {
         return getJson('spaces/XWiki/pages/' + encodeURIComponent(group) +
           '/objects/XWiki.XWikiGroups/' + object.number + '/properties/member')
-          .then(function (property) { return property.value === user; })
+          .then(function (property) {
+            if (property.value === user) { return true; }
+            var nested = (property.value || '').replace(/^xwiki:/, '').match(/^XWiki\.(.+)$/);
+            return nested ? groupHasMember(nested[1], user, visited) : false;
+          })
           .catch(function () { return false; });
       })).then(function (values) { return values.some(Boolean); });
     }).catch(function () { return false; });
@@ -154,6 +129,18 @@ var busy = false;
   function spaceAndPage(reference) {
     var parts = reference.split('.');
     return { page: parts.pop(), spaces: parts };
+  }
+
+  function publicationLocation(reference) {
+    var info = spaceAndPage(reference);
+    // A normal XWiki page is Drafts.<article>.WebHome. WebHome is the
+    // storage document name, not the article name. Publish a terminal article
+    // in the category, as expected by the category's ArticleClass listing.
+    var nested = info.page === 'WebHome' && info.spaces.length > 1;
+    return {
+      name: nested ? info.spaces[info.spaces.length - 1] : info.page,
+      categories: info.spaces.slice(1, nested ? -1 : undefined)
+    };
   }
 
   function primaryCategory(reference) {
@@ -198,11 +185,11 @@ var busy = false;
   }
 
   function defaultTarget(reference, selectedKey) {
-    var info = spaceAndPage(reference);
+    var info = publicationLocation(reference);
     if (selectedKey !== undefined && selectedKey !== null) {
       return Promise.resolve({
         parent: selectedKey === '__root__' ? 'Knowledge' : 'Knowledge.' + selectedKey,
-        name: info.page
+        name: info.name
       });
     }
     return primaryCategory(reference).then(function (category) {
@@ -210,10 +197,10 @@ var busy = false;
         var parentParts = ['Knowledge'];
         if (categoryKey) {
           parentParts.push(categoryKey);
-        } else if (info.spaces.length > 1) {
-          parentParts = parentParts.concat(info.spaces.slice(1));
+        } else {
+          parentParts = parentParts.concat(info.categories);
         }
-        return { parent: parentParts.join('.'), name: info.page };
+        return { parent: parentParts.join('.'), name: info.name };
       });
     });
   }
@@ -357,13 +344,17 @@ var busy = false;
     setFormValue(form, 'targetIsTerminal', 'on');
     var terminal = form.querySelector('[name="targetIsTerminal"]');
     if (terminal) { terminal.checked = true; }
+    // Normal pages default to including children in the upstream start form.
+    // This shortcut publishes one article to a terminal category entry.
+    var includeChildren = form.querySelector('[name="includeChildren"]');
+    if (includeChildren) { includeChildren.checked = false; }
     var startAsTarget = form.querySelector('[name="startAsTarget"]');
     var editingPublishedArticle = reference.indexOf('Knowledge.') === 0;
     if (startAsTarget) { startAsTarget.checked = editingPublishedArticle; }
     var workflow = form.querySelector('[name="workflow"]');
     if (workflow) {
       var option = Array.from(workflow.options).find(function (item) {
-        return item.value === CONFIG || item.value.endsWith('/LuxPedia/Workflow/Config') ||
+        return item.value.replace(/^xwiki:/, '') === CONFIG.replace(/^xwiki:/, '') || item.value.endsWith('/LuxPedia/Workflow/Config') ||
           item.textContent.indexOf('LuxPedia 发布流程配置') !== -1;
       });
       if (option) { workflow.value = option.value; }
@@ -374,7 +365,14 @@ var busy = false;
 
   function continuePendingSubmission(reference) {
     var key = PREFIX + reference;
-    if (sessionStorage.getItem(key) !== '1' || busy) { return; }
+    if (sessionStorage.getItem(key) !== '1' || busy || !uiRoles || (!uiRoles.editor && !uiRoles.admin)) { return; }
+    var params = new URLSearchParams(location.search);
+    if (params.get('targetexists') === 'true' || params.get('same') === 'true' || params.has('error')) {
+      sessionStorage.removeItem(key);
+      sessionStorage.removeItem(key + '.category');
+      window.alert(t('submitFailed'));
+      return;
+    }
     busy = true;
     workflowObjectExists(reference).then(function (exists) {
       if (!exists) {
@@ -384,7 +382,7 @@ var busy = false;
           if (!saved) {
             sessionStorage.removeItem(key);
             sessionStorage.removeItem(key + '.category');
-            window.alert('分类信息保存失败，请重试；草稿尚未提交。');
+            window.alert(t('categorySaveFailed'));
             return 'done';
           }
           return defaultTarget(reference, chosen ? chosen.key : undefined).then(function (target) {
@@ -410,10 +408,12 @@ var busy = false;
       });
     }).then(function (state) {
       if (state === 'done') { return; }
-      busy = false;
-      if (state === 'waiting') { setTimeout(function () { continuePendingSubmission(reference); }, 900); }
+      if (state === 'waiting') {
+        busy = false;
+        setTimeout(function () { continuePendingSubmission(reference); }, 900);
+      }
       // After starting or submitting, XWiki redirects/reloads the same page. The
-      // session flag is intentionally kept until the validating state is visible.
+      // session flag and busy lock stay set until the new document is loaded.
     }).catch(function () { busy = false; });
   }
 
@@ -423,15 +423,15 @@ var busy = false;
     if (!done) { return false; }
     if (done.getAttribute('data-luxpedia-submit-bound') === '1') { return true; }
     done.setAttribute('data-luxpedia-submit-bound', '1');
-    done.title = '保存并提交审核';
+    done.title = t('saveSubmit');
     Array.from(done.childNodes).forEach(function (node) {
       if (node.nodeType === Node.TEXT_NODE) { node.textContent = ''; }
     });
     var text = Array.from(done.querySelectorAll('*')).find(function (node) {
       return node.childElementCount === 0 && node.textContent.trim() === 'Done';
     });
-    if (text) { text.textContent = '保存并提交审核'; }
-    else { done.appendChild(document.createTextNode('保存并提交审核')); }
+    if (text) { text.textContent = t('saveSubmit'); }
+    else { done.appendChild(document.createTextNode(t('saveSubmit'))); }
     done.addEventListener('click', function () {
       sessionStorage.setItem(PREFIX + reference, '1');
       var category = document.querySelector('#luxpedia-publish-category');
@@ -460,7 +460,7 @@ var busy = false;
       container.style.cssText = 'margin:8px 0;padding:8px 10px;background:#f5f7fa;border:1px solid #d9dee7;border-radius:4px;';
       if (hasWorkflow) {
         workflowTarget(reference).then(function (target) {
-          container.textContent = target ? '提交后将发布到原位置：' + target : '此草稿已关联发布位置，提交后会保持原分类。';
+          container.textContent = target ? t('linkedTarget') + ' ' + target : t('linkedFallback');
           var editor = document.querySelector('#xwikieditor');
           if (editor && editor.parentNode) { editor.parentNode.insertBefore(container, editor); }
         });
@@ -469,14 +469,15 @@ var busy = false;
       Promise.all([categoryOptions(), primaryCategory(reference)]).then(function (values) {
         var options = Array.isArray(values[0]) ? values[0] : [];
         var current = values[1];
-        var info = spaceAndPage(reference);
+        var info = publicationLocation(reference);
         var select = document.createElement('select');
         select.id = 'luxpedia-publish-category';
         select.className = 'form-control';
         select.style.cssText = 'display:inline-block;width:auto;min-width:14em;margin:0 8px;';
         var rootOption = document.createElement('option');
         rootOption.value = '__root__';
-        rootOption.textContent = '知识库根目录';
+        rootOption.textContent = t('root');
+        rootOption.dataset.luxpediaI18n = 'root';
         rootOption.dataset.label = '';
         select.appendChild(rootOption);
         options.forEach(function (entry) {
@@ -488,16 +489,18 @@ var busy = false;
         });
         var selected = options.find(function (entry) { return entry.label === current; });
         if (selected) { select.value = selected.key; }
-        else if (info.spaces.length > 1) {
-          var nestedKey = info.spaces.slice(1).join('.');
+        else if (info.categories.length) {
+          var nestedKey = info.categories.join('.');
           if (options.some(function (entry) { return entry.key === nestedKey; })) { select.value = nestedKey; }
         }
         var label = document.createElement('label');
         label.htmlFor = select.id;
-        label.textContent = '审核通过后发布到分类：';
+        label.textContent = t('chooseCategory');
+        label.dataset.luxpediaI18n = 'chooseCategory';
         var hint = document.createElement('span');
         hint.style.cssText = 'color:#666;margin-left:6px;';
-        hint.textContent = '默认使用文章主分类，可在提交前调整。';
+        hint.textContent = t('categoryHint');
+        hint.dataset.luxpediaI18n = 'categoryHint';
         container.appendChild(label);
         container.appendChild(select);
         container.appendChild(hint);
@@ -510,12 +513,14 @@ var busy = false;
   }
 
   function prepareVisibleStartForm(reference, attempts) {
-    if (attempts >= 30) { return; }
+    if (attempts >= 30 || sessionStorage.getItem(PREFIX + reference) === '1') { return; }
     if (!workflowActionForm(['start'])) {
       setTimeout(function () { prepareVisibleStartForm(reference, attempts + 1); }, 500);
       return;
     }
     defaultTarget(reference).then(function (target) {
+      // An automatic submission owns the selected target until it completes.
+      if (sessionStorage.getItem(PREFIX + reference) === '1') { return; }
       if (!prepareStartForm(reference, target)) {
         setTimeout(function () { prepareVisibleStartForm(reference, attempts + 1); }, 500);
       }
@@ -529,9 +534,11 @@ var busy = false;
     var user = currentUser();
     if (!reference || !user || initPending || initializedReference === reference) { return; }
     initPending = true;
-    Promise.all([isEditor(user), isManager(user)]).then(function (roles) {
+    Promise.all([isEditor(user), isManager(user), groupHasMember('LuxReviewers', user)]).then(function (roles) {
       initPending = false;
-      if (!roles[0]) { return; }
+      uiRoles = { editor: roles[0], admin: roles[1], reviewer: roles[2] };
+      translateWorkflowUI();
+      if (!roles[0] && !roles[1]) { return; }
       initializedReference = reference;
       var isAdmin = roles[1];
       waitForDoneButton(reference, isAdmin, 0);
@@ -565,6 +572,7 @@ var busy = false;
       continuePendingSubmission(reference);
     }
   }
+  document.addEventListener('luxpedia:languagechange', translateWorkflowUI);
   if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', boot); }
   else { boot(); }
   window.setInterval(resumePendingSubmission, 700);
@@ -575,6 +583,9 @@ var busy = false;
   }
 })();
 """
+
+WORKFLOW_UX_JS = I18N_JS + WORKFLOW_UX_JS.replace(
+    '/* LUXPEDIA_WORKFLOW_PANEL */', (UI / 'workflow_panel.js').read_text())
 
 WORKFLOW_UX_PROPERTIES = {
     "name": "luxpedia.workflowUX",
@@ -736,8 +747,11 @@ def ensure_page_right(wiki, space, page, properties):
 
 
 def apply(module, wiki):
+    from apply_workflow_security import apply as apply_security
+    from apply_interface import apply as apply_interface
+    apply_security(module, wiki)
     module.log("== workflow configuration")
-    wiki.ensure_page(CONFIG_SPACE, CONFIG_PAGE, "LuxPedia 发布流程配置", CONFIG_CONTENT, hidden=True)
+    wiki.ensure_page(CONFIG_SPACE, CONFIG_PAGE, "LuxPedia publication workflow", CONFIG_CONTENT, hidden=True, update=True)
     wiki.ensure_object_values(CONFIG_SPACE, CONFIG_PAGE, CONFIG_CLASS, CONFIG_VALUES)
     module.log("== lock LuxPedia configuration/help space")
     wiki.ensure_page("LuxPedia", "WebPreferences", "WebPreferences", "", hidden=True)
@@ -837,6 +851,22 @@ def apply(module, wiki):
     module.log("== editor save-and-submit workflow UX")
     wiki.ensure_page(UX_SPACE, UX_PAGE, "Workflow UX script", "Automatic destination selection and editor save-and-submit behavior.", hidden=True)
     wiki.ensure_object_values(UX_SPACE, UX_PAGE, "XWiki.JavaScriptExtension", WORKFLOW_UX_PROPERTIES)
+    apply_interface(module, wiki)
+    # Update auxiliary controls to use the same persisted interface language.
+    for filename in ("apply_video_insert.py", "apply_admin_upload.py"):
+        spec = importlib.util.spec_from_file_location(filename[:-3], ROOT / "scripts" / filename)
+        auxiliary = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(auxiliary)
+        if filename == "apply_video_insert.py":
+            auxiliary.apply(module, wiki)
+        else:
+            wiki.ensure_page(auxiliary.JS_SPACE, auxiliary.JS_PAGE, "Upload limit control", "Upload limit control.", hidden=True)
+            wiki.ensure_object_values(auxiliary.JS_SPACE, auxiliary.JS_PAGE, "XWiki.JavaScriptExtension", auxiliary.JS_PROPERTIES)
+            for number in wiki.objects("XWiki", "XWikiPreferences", "XWiki.ConfigurableClass"):
+                values = wiki.object_values("XWiki", "XWikiPreferences", "XWiki.ConfigurableClass", number)
+                if values.get("displayInSection") == "attachmentsrestriction":
+                    wiki.set_object_property("XWiki", "XWikiPreferences", "XWiki.ConfigurableClass", number,
+                                             "heading", "Attachment upload limit (MB)")
 
 
 def main():

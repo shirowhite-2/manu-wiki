@@ -1,5 +1,7 @@
 # Publication Workflow 现成扩展核对与 POC 操作说明
 
+> 当前分支新增了保存前的服务端角色校验和默认英文/可切换中文的界面，部署顺序、权限矩阵和旧稿迁移见[角色与界面说明](roles-and-interface.md)。以下上游扩展说明和实例记录保留作历史参考；运行 Python 应用脚本前，必须先安装 `workflow-policy` 组件。新增策略尚未在真实实例重新验收。
+
 核对日期：2026-11-12。目标环境：XWiki 17.10.15 LTS。
 
 **状态：2.4.9已安装到XWiki17.10.15；两角色的起草→提交审核→审核者发布流程已在实例实测通过。完整三角色、通知、目录树和附件同步等仍待验收，详见文末。**
@@ -105,7 +107,19 @@ published → Edit draft → draft（旧发布页保留）
 
 实现脚本 `scripts/apply_workflow.py` 把配置和界面行为写入 XWiki。`LuxPedia.Code.WorkflowUXScript` 通过 JavaScriptExtension：编辑者的 Done 改为“保存并提交审核”；保存完成后驱动工作流开始/提交；管理员保持原生按钮。XWiki 数据库存放工作流对象和页面状态，脚本用于在其他实例复现设置。
 
-2026-11-17 浏览器端到端验收：
+### 新建草稿选择分类后未进入队列的修复
+
+普通 XWiki 页面保存为 `Drafts.文章名.WebHome`。旧代码选择分类时把最后的 `WebHome` 当作文章名，生成 `Knowledge.Technical.WebHome` 一类目标，和已有分类首页冲突。上游工作流返回 `targetexists=true`，因此没有创建工作流对象，也不会进入待审核列表。
+
+现在普通页面使用倒数第二段作为文章名，发布目标为分类下的终端文章页。例如 `Drafts.新文章.WebHome` 选择“技术文档”后，目标为 `Knowledge.Technical.新文章`；终端草稿 `Drafts.新文章` 使用相同规则。单篇文章的快捷提交不包含子页。草稿仍保留在 Drafts，先进入 `validating` 队列；审核人发布后，扩展才在所选分类生成目标副本。已有工作流的文章保留原目标。真实的同名冲突会提示“已保存但未提交审核”，并停止自动重试。
+
+修复脚本后，需在目标实例以管理员配置运行 `python3 scripts/apply_workflow.py --apply`，更新数据库中的 JavaScriptExtension；仅更新仓库文件不会改变已部署实例。部署后重新加载编辑器页面，以免继续使用浏览器缓存的旧脚本。之前尚无工作流对象的草稿可以重新编辑、选择分类并提交；已关联到错误目标的草稿需要管理员单独检查，脚本不会自动重定向已有工作流。
+
+离线浏览器回归测试：安装 Node.js、Python 3、Playwright 和 Chromium 后运行 `node --test tests/workflow_ux.test.cjs`。使用系统 Chromium 时可设置 `CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium`。测试使用本地 HTTP 服务模拟上游表单、REST 和重定向，覆盖普通页、终端页、分类元数据、根目录选择、原目标保留、同名冲突和管理员保存。它验证脚本的浏览器行为，不代替真实 XWiki 的审核发布验收。
+
+### 既有实例验收记录
+
+以下为原有的 2026-11-17 浏览器端到端验收记录，不包含上述修复在真实实例上的重新验收：
 
 - 新建测试草稿：编辑者点击“保存并提交审核”后自动进入 `validating`，默认目标按 `ArticleClass.primaryCategory` 指向 `Knowledge.Technical`；审核人发布后生成 Knowledge 页面。
 - 已发布测试文章：编辑者从 Knowledge 的 Go to draft 进入 Drafts 关联草稿；保存并提交后目标仍为原 `Knowledge.Technical` 页面，审核人发布后更新原页面。
