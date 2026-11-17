@@ -87,8 +87,11 @@ def apply(module, wiki):
                                 'application/x-www-form-urlencoded')
     verify_response(status, body, 'AUDIT_CLASS_READY', 'PolicySetup', redactions=(token,))
     for group in ("XWiki.LuxEditors", "XWiki.LuxReviewers", "XWiki.LuxReaders"):
+        # XWiki requires existing programming rights even to write a DENY rule
+        # containing "programming". Leave that separately protected right alone;
+        # a delegated wiki administrator can safely restrict ordinary scripting.
         wiki.ensure_right("XWiki", "XWikiPreferences", {
-            "groups": group, "levels": "script,programming", "allow": "0"})
+            "groups": group, "levels": "script", "allow": "0"})
         wiki.ensure_right("Knowledge", "WebPreferences", {
             "groups": group, "levels": "edit,delete,admin", "allow": "0"})
         for space in ("LuxPedia", "PublicationWorkflow"):

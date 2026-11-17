@@ -101,13 +101,26 @@ class InterfaceConfigTest(unittest.TestCase):
         security.apply(Module, wiki)
         for group in ('LuxEditors', 'LuxReviewers', 'LuxReaders'):
             self.assertIn(('XWiki', 'XWikiPreferences', {
-                'groups': 'XWiki.' + group, 'levels': 'script,programming', 'allow': '0'}), wiki.rights)
+                'groups': 'XWiki.' + group, 'levels': 'script', 'allow': '0'}), wiki.rights)
         self.assertIn(('Knowledge', 'WebPreferences', {
             'groups': 'XWiki.LuxReaders', 'levels': 'comment', 'allow': '0'}), wiki.rights)
         setup = next(request for request in wiki.requests if 'PolicySetup?' in request[1])
         self.assertEqual(setup[0], 'POST')
         self.assertEqual(setup[2], 'form_token=test-token')
         self.assertNotIn('{{groovy}}', security.HEALTH + security.SETUP)
+
+    def test_delegated_admin_never_changes_protected_programming_rules(self):
+        class DelegatedAdminWiki(FakeWiki):
+            def ensure_right(self, space, page, values):
+                if 'programming' in values.get('levels', '').split(','):
+                    raise PermissionError('XWiki removes programming ACLs written without programming rights')
+                super().ensure_right(space, page, values)
+        wiki = DelegatedAdminWiki()
+        existing = ('XWiki', 'XWikiPreferences', {
+            'groups': 'XWiki.XWikiAdminGroup', 'levels': 'programming', 'allow': '1'})
+        wiki.rights.append(existing)
+        security.apply(Module, wiki)
+        self.assertEqual([rule for rule in wiki.rights if 'programming' in rule[2]['levels'].split(',')], [existing])
 
     def test_script_denial_is_not_reported_as_a_missing_jar(self):
         body = b'Failed to execute the [groovy] macro. The execution of the [groovy] script macro is not allowed.'

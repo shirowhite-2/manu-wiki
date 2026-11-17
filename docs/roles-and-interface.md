@@ -11,7 +11,7 @@
 | `canContribute` 包含 validator，archive 也使用此检查 | 审核人可调用作者操作，编辑者可尝试归档已发布内容 | 服务端仅允许编辑者起草、重开和提交；归档、撤下、删除等归管理员 |
 | 没有独立审核检查 | 同一账号兼任编辑和审核时可审批自己的提交 | 审核记录由服务端保存提交人、最新正文作者和送审版本；提交人、最新正文作者及草稿创建人不能批准、发布或退回自己的稿件 |
 | reader 的配置包含 comment，但角色说明是只读 | 读者可发表评论 | 明确拒绝读者对 Knowledge 的 comment 权限；保存校验也限制评论操作角色 |
-| 普通角色没有显式禁止脚本与编程权限 | 不能把这类账号当作只处理内容的角色 | 增加 script/programming 拒绝规则，保护系统代码和角色组；不依赖按钮隐藏 |
+| 普通角色没有显式禁止脚本 | 不能把这类账号当作只处理内容的角色 | 增加 script 拒绝规则，保护系统代码和角色组；不依赖按钮隐藏。programming 属于另行受保护的高权限，部署脚本不修改该配置 |
 | 新建普通页面的末段是 WebHome | 选择分类后目标撞上分类首页，不能进入审批 | 用文章容器名构建终端发布目标；保留已有工作流目标；跳转前持续持有提交锁，避免重复启动 |
 
 上游依据：[`setupDraftAccess` / `submitForValidation`](https://github.com/xwiki-contrib/workflow-publication/blob/xwiki-workflow-publication-2.4.9/xwiki-workflow-publication-api/src/main/java/org/xwiki/workflowpublication/internal/DefaultPublicationWorkflow.java)、[`canContribute`](https://github.com/xwiki-contrib/workflow-publication/blob/xwiki-workflow-publication-2.4.9/xwiki-workflow-publication-api/src/main/java/org/xwiki/workflowpublication/internal/DefaultPublicationRoles.java)、[`RolesEnforcerListener`](https://github.com/xwiki-contrib/workflow-publication/blob/xwiki-workflow-publication-2.4.9/xwiki-workflow-publication-api/src/main/java/org/xwiki/workflowpublication/internal/RolesEnforcerListener.java)。
@@ -29,7 +29,9 @@
 | 评论已发布内容 | 允许 | 允许 | 允许 | 拒绝 |
 | 归档、撤下、删除、配置、成员管理 | 允许 | 拒绝 | 拒绝 | 拒绝 |
 
-编辑者仍在同一组内共享草稿，并非每篇草稿仅限创建人可编辑。管理员保留恢复和修复权限，不属于强制独立审核边界。应避免管理员同时加入普通角色组，防止 script/programming 的显式拒绝影响管理脚本。审核和编辑兼任时，自审仍会被服务端拒绝。文档和分类的 view 限制在提交与发布时继续检查。
+编辑者仍在同一组内共享草稿，并非每篇草稿仅限创建人可编辑。管理员保留恢复和修复权限，不属于强制独立审核边界。应避免管理员同时加入普通角色组，防止 script 的显式拒绝影响管理脚本。审核和编辑兼任时，自审仍会被服务端拒绝。文档和分类的 view 限制在提交与发布时继续检查。
+
+普通角色不应具有 programming 权限；该权限允许执行服务器代码，不属于业务角色隔离的边界。部署脚本保留现有 programming 配置，不尝试授予、撤销或写入包含它的拒绝规则。有资格管理该权限的管理员仍需单独核查其授权及继承分组，并收回普通账号已有的高权限；本次配置不等同于完成该项审计。
 
 组件只依赖 XWiki 核心接口，不在 WEB-INF 中引用 Extension Manager 子类加载器里的工作流 API。原生状态转换通过服务端 Java 调用栈识别，客户端 `action` 参数不构成授权；业务角色、原状态、审核人身份和目标范围仍须逐项通过校验。策略针对 2.4.9 的单篇文章流程，默认拒绝其他流程操作；升级上游版本前必须重新验收。组件不把用户正文视为可执行的管理脚本。
 
@@ -84,3 +86,7 @@ npm run test:ui
 ### 初始化报 `The resolver parameter doesn't contain an Entity Reference of type [WIKI]`
 
 旧版本修复历史草稿 ACL 时，用显式解析器处理 `Drafts.文章名.WebHome` 一类查询结果，却遗漏了当前 Wiki 参数。新版显式传入 `WikiReference`，并校验迁移范围仍在当前 Wiki 的 Drafts 内；真实解析器回归覆盖嵌套页面、转义名称及非默认 Wiki。这项修复属于 Java 组件，需要更新代码、重新打包 JAR、重建镜像并重建 XWiki 容器后，再运行配置脚本。
+
+### 创建 `script,programming` 全局权限规则返回 HTTP 500
+
+如果日志显示 `programming access has been denied`，随后 `RightsFilterListener` 移除了刚写入的规则，表示当前账号虽可管理 Wiki，却没有资格设置 programming 权限。XWiki 对包含 programming 的拒绝规则也执行这项检查。新版只设置普通角色的 script 拒绝规则，保留原有 programming 配置；这项修复只需更新 Python 脚本，不需要重建 JAR 或容器。
