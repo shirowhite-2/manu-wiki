@@ -228,10 +228,36 @@ class WorkflowPolicyListenerTest {
         when(doc.getObject(WorkflowPolicyListener.WF).getStringValue("target")).thenReturn("XWiki.LuxManagers");
         assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
     }
-    @Test void workflowCannotOverwriteCategoryHome() {
+    @Test void workflowCannotOverwriteCategoryHome() throws Exception {
         policy.operation = "startWorkflow"; states(null, "draft");
+        XWikiDocument category = document("Knowledge.Technical.WebHome");
+        when(category.getObject("LuxPedia.Code.CategoryClass")).thenReturn(mock(BaseObject.class));
         when(doc.getObject(WorkflowPolicyListener.WF).getStringValue("target")).thenReturn("Knowledge.Technical.WebHome");
         assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
+    }
+    @Test void ordinaryWebHomeArticleDoesNotNeedArticleClassToSupportReviewedChanges() throws Exception {
+        document("Knowledge.test.WebHome");
+        assertTrue(policy.validTarget(ref("Knowledge.test.WebHome"), context));
+    }
+    @Test void editorCanCreateALinkedDraftForAnOrdinaryKnowledgeWebHome() throws Exception {
+        policy.operation = "createDraftDocument"; states(null, "draft");
+        when(old.isNew()).thenReturn(true);
+        when(doc.getObject(WorkflowPolicyListener.WF).getStringValue("target")).thenReturn("Knowledge.test.WebHome");
+        XWikiDocument article = document("Knowledge.test.WebHome");
+        BaseObject published = object("published");
+        when(published.getIntValue("istarget")).thenReturn(1);
+        when(article.getObject(WorkflowPolicyListener.WF)).thenReturn(published);
+        assertDoesNotThrow(() -> policy.check(doc, context, false));
+    }
+    @Test void aNestedArticleCanShareASystemIndexName() throws Exception {
+        document("Knowledge.Technical.CategoryGuide");
+        assertTrue(policy.validTarget(ref("Knowledge.Technical.CategoryGuide"), context));
+    }
+    @Test void rootIndexesAndSpacePreferencesAreStillProtected() throws Exception {
+        for (String name : List.of("Knowledge.WebHome", "Knowledge.DocumentLibrary", "Knowledge.CategoryIndex",
+                "Knowledge.CategoryGuide", "Knowledge.CategoryAdmin", "Knowledge.Technical.WebPreferences")) {
+            document(name); assertFalse(policy.validTarget(ref(name), context), name);
+        }
     }
     @Test void editorCannotStartAsPublishedTarget() {
         policy.operation = "startWorkflowAsTarget"; states(null, "published");
@@ -387,16 +413,17 @@ class WorkflowPolicyListenerTest {
         when(policy.localSerializer.serialize(any())).thenAnswer(call -> call.getArgument(0).toString().replace("xwiki:", ""));
         policy.queries = mock(QueryManager.class); Query query = mock(Query.class, RETURNS_SELF);
         when(policy.queries.createQuery(anyString(), eq(Query.XWQL))).thenReturn(query);
-        when(query.execute()).thenReturn(List.of("Knowledge.Article", "Knowledge.Category.Nested.Article", "Knowledge.CategoryAdmin"));
-        for (String name : List.of("Knowledge.Article", "Knowledge.Category.Nested.Article")) {
+        when(query.execute()).thenReturn(List.of("Knowledge.Article", "Knowledge.Category.Nested.Article", "Knowledge.test.WebHome", "Knowledge.CategoryAdmin"));
+        for (String name : List.of("Knowledge.Article", "Knowledge.Category.Nested.Article", "Knowledge.test.WebHome")) {
             XWikiDocument original = document(name), registered = document(name);
             documents.put(ref(name), original); when(original.clone()).thenReturn(registered);
             when(original.getContentAuthorReference()).thenReturn(ref("XWiki.author"));
         }
         XWikiDocument root = documents.get(ref("Knowledge.Article"));
         XWikiDocument nested = documents.get(ref("Knowledge.Category.Nested.Article"));
-        assertEquals(2, policy.registerExistingKnowledgeTargets(context));
-        for (XWikiDocument original : List.of(root, nested)) {
+        XWikiDocument plain = documents.get(ref("Knowledge.test.WebHome"));
+        assertEquals(3, policy.registerExistingKnowledgeTargets(context));
+        for (XWikiDocument original : List.of(root, nested, plain)) {
             XWikiDocument saved = original.clone();
             verify(saved).setContentAuthorReference(ref("XWiki.author"));
             verify(saved, never()).setContent(anyString());

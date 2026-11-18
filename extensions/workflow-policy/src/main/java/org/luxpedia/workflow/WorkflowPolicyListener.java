@@ -225,9 +225,10 @@ public class WorkflowPolicyListener implements EventListener
 
     boolean validTarget(DocumentReference ref, XWikiContext context) throws Exception {
         XWikiDocument target = context.getWiki().getDocument(ref, context);
-        return ref.getSpaceReferences().get(0).getName().equals("Knowledge") && !SYSTEM_NAMES.contains(ref.getName()) &&
-            !(ref.getName().equals("WebHome") && ref.getSpaceReferences().size() <= 2 &&
-                target.getObject("LuxPedia.Code.ArticleClass") == null) &&
+        boolean root = ref.getSpaceReferences().size() == 1;
+        return ref.getSpaceReferences().get(0).getName().equals("Knowledge") &&
+            !ref.getName().equals("WebPreferences") &&
+            !(root && (ref.getName().equals("WebHome") || SYSTEM_NAMES.contains(ref.getName()))) &&
             target.getObject("LuxPedia.Code.CategoryClass") == null;
     }
 
@@ -318,7 +319,7 @@ public class WorkflowPolicyListener implements EventListener
         require(drafts.size() == 1, "A unique matching draft workflow is required.");
         return resolver.resolve(drafts.get(0), target);
     }
-    public String getPolicyVersion() { return "luxpedia-workflow-policy-2"; }
+    public String getPolicyVersion() { return "luxpedia-workflow-policy-3"; }
     /** Deployment migration: remove historical validator EDIT grants without re-authoring content. */
     public int repairExistingDraftRights(XWikiContext context) throws Exception {
         require(authorization.hasAccess(Right.ADMIN, context.getUserReference(),

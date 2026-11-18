@@ -89,7 +89,7 @@
     if (uiRoles && !uiRoles.admin) {
       var locked = panelSnapshot && !['unstarted', 'draft'].includes(panelSnapshot.status);
       document.querySelectorAll('#tmEdit, #tmSourceEdit').forEach(function (node) {
-        node.hidden = !uiRoles.editor || Boolean(locked);
+        node.hidden = !uiRoles.editor || Boolean(locked) || documentReference().indexOf('Knowledge.') === 0;
       });
     }
     var done = document.querySelector('[data-luxpedia-preview-bound="1"]');

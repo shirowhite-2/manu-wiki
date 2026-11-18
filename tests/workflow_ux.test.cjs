@@ -62,6 +62,7 @@ async function wikiFixture(options = {}) {
       <p role="note">Local test fixture. The production LuxPedia theme is not loaded.</p>
       <div data-xwiki-form-token="test-token"></div>
       <a id="tmUser" href="/bin/view/XWiki/${options.admin ? 'Admin' : 'editor'}">Profile</a>
+      ${options.nativeEdit ? '<a id="tmEdit" href="' + editPath + '">Edit</a>' : ''}
       <div id="document-title"><h1>New article</h1></div>
       ${edit ? `<div><textarea id="xwikieditor"></textarea></div>
         <button class="realtime-action-done" onclick="location.href='${viewPath}'">Done</button>` : '<div class="panel"><h2 class="panel-title">Workflow</h2><div class="publicationworkflow-info">' + workflow + '</div></div>'}
@@ -469,5 +470,28 @@ test('an editor opens a linked draft from Knowledge while keeping the published 
     assert.equal(wiki.state.target, 'Knowledge.Technical.Article');
     assert.deepEqual(wiki.state.actions.map(action => action.action), ['getEditableDraft']);
     assert.equal(wiki.state.status, 'draft');
+  } finally { await wiki.context.close(); }
+});
+
+test('native Edit on Knowledge/test opens its linked draft instead of editing the published copy', async () => {
+  const wiki = await wikiFixture({ reference: 'Knowledge.test.WebHome', status: 'published',
+    linkedTarget: 'Knowledge.test.WebHome', nativeEdit: true });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/view/Knowledge/test/');
+    await wiki.page.locator('#tmEdit[data-luxpedia-draft-edit="1"]').click();
+    await wiki.page.waitForURL(/\/bin\/edit\/Drafts\/Linked\/Article/);
+    assert.equal(wiki.state.target, 'Knowledge.test.WebHome');
+    assert.deepEqual(wiki.state.actions.map(action => action.action), ['getEditableDraft']);
+    assert.deepEqual(wiki.state.errors, []);
+  } finally { await wiki.context.close(); }
+});
+
+test('an unregistered Knowledge page does not expose a native direct-edit link', async () => {
+  const wiki = await wikiFixture({ reference: 'Knowledge.test.WebHome', nativeEdit: true });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/view/Knowledge/test/');
+    await wiki.page.waitForFunction(() => document.querySelector('.luxpedia-state')?.textContent === 'Not submitted');
+    assert.equal(await wiki.page.locator('#tmEdit').isVisible(), false);
+    assert.equal(wiki.state.actions.length, 0);
   } finally { await wiki.context.close(); }
 });

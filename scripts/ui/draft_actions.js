@@ -104,6 +104,24 @@
           actionPending = false; sessionStorage.removeItem(EDIT_TARGET); renderDraftActions();
         }
       }, true);
+      // Native Edit must open the linked draft, rather than request EDIT on the published copy.
+      // Administrators retain their native recovery/edit tools.
+      if (!uiRoles.admin) {
+        document.querySelectorAll('a#tmEdit, #tmEdit a').forEach(function (link) {
+          link.href = location.pathname + location.search + '#luxpedia-draft-actions';
+          link.title = t('editArticleHint');
+          if (!link.dataset.luxpediaDraftEdit) {
+            link.dataset.luxpediaDraftEdit = '1';
+            link.addEventListener('click', function (event) {
+              event.preventDefault(); event.stopImmediatePropagation();
+              var button = document.getElementById('luxpedia-edit-article');
+              if (button) { button.click(); }
+            }, true);
+          }
+          var menu = document.getElementById('tmEdit');
+          if (menu) { menu.hidden = false; }
+        });
+      }
     } else if (withdrawVersion) {
       button('luxpedia-withdraw-review', 'withdraw', function () {
         if (actionPending || !window.confirm(t('withdrawConfirm'))) { return; }
