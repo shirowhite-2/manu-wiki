@@ -76,7 +76,7 @@
   "categoryCreated": "Category created.",
   "categoryExists": "This category key already exists.",
   "invalidToken": "Invalid form token. Reload the page and try again.",
-  "guideContent": "Editors can edit content and attachments across Knowledge and Drafts, including home and category pages. In Knowledge, choose Edit content to open the linked draft. Save draft and preview, check the rendered page, then Submit for review. The published page changes only after approval. The submitter can withdraw a pending request. Reviewers approve and publish or return it for changes; the submitter cannot review their own work. Published working copies stay hidden until editing resumes. Editors can update the writing-area home directly. Administrators manage category definitions, permissions, users and system configuration.",
+  "guideContent": "Editors can edit content and attachments across Knowledge and Drafts, including home and category pages. In Knowledge, choose Edit content to open the linked draft. Save draft and preview, check the rendered page, then Submit for review. The published page changes only after approval. The submitter can withdraw a pending request. Reviewers approve and publish or return it for changes; the submitter cannot review their own work. Published working copies stay hidden until editing resumes. Editors can update the writing-area home directly. Administrators manage category definitions, permissions, users and system configuration.\n\nFor draw.io diagrams, use File → Export as → URL or File → Publish → Link in draw.io. In the draft editor, paste the link in the draw.io link field and select Insert draw.io. Save and preview, then choose Preview diagram next to the link. Readers can also open the original link in a new tab. Private storage links may require sign-in and open through the original link instead of an inline preview.",
   "uploadLimit": "Attachment upload limit (MB)",
   "uploadUnit": " MB (converted to bytes when saved)",
   "uploadInvalid": "Enter an integer from 1 to 99999 MB.",
@@ -155,5 +155,15 @@
   "originalLocation": "Original location",
   "archiveEmpty": "No archived articles or documents stored in this category.",
   "articleTemplate": "Article",
-  "articleTemplateDescription": "Start with sections for purpose, procedure, validation and references. Save and preview before submitting for review."
+  "articleTemplateDescription": "Start with sections for purpose, procedure, validation and references. Save and preview before submitting for review.",
+  "drawioLink": "draw.io link",
+  "drawioInsert": "Insert draw.io",
+  "drawioOpen": "Open diagram in draw.io",
+  "drawioPreview": "Preview diagram",
+  "drawioHide": "Hide diagram",
+  "drawioFrameTitle": "draw.io diagram preview",
+  "drawioInvalid": "Enter an HTTPS share link from app.diagrams.net or viewer.diagrams.net, not iframe HTML.",
+  "drawioInserted": "Diagram link inserted. Save and preview to view the diagram before submitting for review.",
+  "drawioLinkOnly": "Open the original link to view this diagram. For an inline preview, use a published link containing the diagram or a public file URL.",
+  "drawioExternalHint": "Preview loads from draw.io. If it is blocked or requires sign-in, open the original link above."
 }

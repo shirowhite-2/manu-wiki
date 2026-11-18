@@ -812,6 +812,8 @@ def apply(module, wiki):
     wiki.ensure_page(UX_SPACE, UX_PAGE, "Workflow UX script", "Draft preview, explicit review submission and withdrawal controls.", hidden=True)
     wiki.ensure_object_values(UX_SPACE, UX_PAGE, "XWiki.JavaScriptExtension", WORKFLOW_UX_PROPERTIES)
     apply_interface(module, wiki)
+    from apply_drawio import apply as apply_drawio
+    apply_drawio(module, wiki)
     # Update auxiliary controls to use the same persisted interface language.
     for filename in ("apply_video_insert.py", "apply_admin_upload.py"):
         spec = importlib.util.spec_from_file_location(filename[:-3], ROOT / "scripts" / filename)

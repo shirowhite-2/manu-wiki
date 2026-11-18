@@ -76,7 +76,7 @@
   "categoryCreated": "分类已创建。",
   "categoryExists": "此分类代号已存在。",
   "invalidToken": "表单令牌无效，请刷新页面后重试。",
-  "guideContent": "编辑者可维护知识库和草稿区的正文与附件，包括首页、分类页和目录说明。在知识库点击“编辑内容”打开关联草稿；保存并预览，确认页面效果后再提交审核，批准后正式版才会变化。提交人可以撤回待处理请求。审核人批准发布或退回修改，不能审核自己的提交。发布后的工作副本会隐藏，再次修改时恢复。编辑者可直接维护编写区首页。分类定义、账号、权限和系统配置仍由管理员管理。",
+  "guideContent": "编辑者可维护知识库和草稿区的正文与附件，包括首页、分类页和目录说明。在知识库点击“编辑内容”打开关联草稿；保存并预览，确认页面效果后再提交审核，批准后正式版才会变化。提交人可以撤回待处理请求。审核人批准发布或退回修改，不能审核自己的提交。发布后的工作副本会隐藏，再次修改时恢复。编辑者可直接维护编写区首页。分类定义、账号、权限和系统配置仍由管理员管理。\n\ndraw.io 图表：在 draw.io 中使用“文件 → 导出为 → URL”或“文件 → 发布 → 链接”生成分享链接。在草稿编辑器的 draw.io 链接框粘贴并点击“插入 draw.io”，保存并预览后，点击链接旁的“预览图表”。读者也可在新标签页打开原链接。私有网盘链接可能需要登录，请通过原链接打开。",
   "uploadLimit": "附件上传上限（MB）",
   "uploadUnit": " MB（保存时自动换算为字节）",
   "uploadInvalid": "请输入 1 到 99999 之间的整数（单位 MB）。",
@@ -155,5 +155,15 @@
   "originalLocation": "原位置",
   "archiveEmpty": "暂无已归档文章或本分类收录的资料。",
   "articleTemplate": "文章模板",
-  "articleTemplateDescription": "包含用途、操作步骤、验证和参考资料等章节。保存并预览后，再提交审核。"
+  "articleTemplateDescription": "包含用途、操作步骤、验证和参考资料等章节。保存并预览后，再提交审核。",
+  "drawioLink": "draw.io 链接",
+  "drawioInsert": "插入 draw.io",
+  "drawioOpen": "在 draw.io 打开图表",
+  "drawioPreview": "预览图表",
+  "drawioHide": "收起图表",
+  "drawioFrameTitle": "draw.io 图表预览",
+  "drawioInvalid": "请填写 app.diagrams.net 或 viewer.diagrams.net 的 HTTPS 分享链接，不要粘贴 iframe 代码。",
+  "drawioInserted": "已插入图表链接。保存并预览后可查看图表，确认后再提交审核。",
+  "drawioLinkOnly": "请通过原链接打开图表。需要页内预览时，请使用包含图表内容的发布链接或指向公开文件的分享链接。",
+  "drawioExternalHint": "预览由 draw.io 加载。若加载受限或需要登录，请打开上方原链接。"
 }

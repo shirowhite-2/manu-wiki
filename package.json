@@ -1,6 +1,6 @@
 {
   "name": "manu-wiki-checks",
   "private": true,
-  "scripts": { "test:ui": "node --test tests/workflow_ux.test.cjs" },
+  "scripts": { "test:ui": "node --test tests/workflow_ux.test.cjs tests/drawio.test.cjs" },
   "devDependencies": { "playwright": "1.62.1" }
 }
