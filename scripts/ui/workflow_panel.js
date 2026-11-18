@@ -92,8 +92,11 @@
         node.hidden = !uiRoles.editor || Boolean(locked);
       });
     }
-    var done = document.querySelector('[data-luxpedia-submit-bound="1"]');
-    if (done) { text(done, t('saveSubmit')); done.title = t('saveSubmit'); }
+    var done = document.querySelector('[data-luxpedia-preview-bound="1"]');
+    if (done) {
+      if (done.tagName === 'INPUT') { done.value = t('savePreview'); } else { text(done, t('savePreview')); }
+      done.title = t('savePreview');
+    }
     [['#tmSourceEdit', 'sourceEdit'], ['#tmEditGuide', 'editGuide']].forEach(function (item) {
       var link = document.querySelector(item[0] + ' a');
       if (link) { text(link.querySelector('.btn-label') || link, t(item[1])); link.title = t(item[1]); }
@@ -110,6 +113,7 @@
       style.textContent += '.publicationworkflow-info .xformInline{display:block}.luxpedia-workflow-extra{margin:1em 0}';
       document.head.appendChild(style);
     }
+    renderDraftActions();
   }
 
   function renderArticleMetadata() {

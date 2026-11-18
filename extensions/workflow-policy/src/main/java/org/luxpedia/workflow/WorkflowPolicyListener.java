@@ -77,7 +77,13 @@ public class WorkflowPolicyListener implements EventListener
             previous == null && next == null) { return; }
         require(user != null, "Sign in to change content.");
         if (authorization.hasAccess(Right.ADMIN, user,
-            new DocumentReference(ref.getWikiReference().getName(), "XWiki", "XWikiPreferences"))) { return; }
+            new DocumentReference(ref.getWikiReference().getName(), "XWiki", "XWikiPreferences"))) {
+            if (!deleting && space.equals("Drafts") && next != null &&
+                Set.of("publish", "editDraft", "createDraftDocument").contains(workflowOperation())) {
+                doc.setHidden(status(next).equals("published"));
+            }
+            return;
+        }
         if (protectedConfiguration) {
             require(false, "Only administrators may change configuration or role membership.");
         }
@@ -150,6 +156,10 @@ public class WorkflowPolicyListener implements EventListener
                 require(after.equals(operation.equals("publish") ? "published" : operation.equals("validate") ? "valid" : "draft"),
                     "Unexpected review transition.");
                 break;
+            case "withdrawSubmission":
+                require(canWithdraw(old, context) && after.equals("draft"),
+                    "Only the submitter may withdraw a pending review request.");
+                break;
             case "":
                 require(old.isNew() || Objects.equals(old.getCreatorReference(), doc.getCreatorReference()),
                     "Article creator identity is immutable.");
@@ -170,7 +180,7 @@ public class WorkflowPolicyListener implements EventListener
                 require(false, "This workflow operation is reserved for administrators.");
         }
         // Upstream grants EDIT to validators. Replace those rules on every native transition.
-        doc.setHidden(false);
+        doc.setHidden(after.equals("published"));
         if (doc.getTranslation() == 0) { normalizeDraftRights(doc, after, context); }
     }
 
@@ -181,6 +191,22 @@ public class WorkflowPolicyListener implements EventListener
         require(!user.toString().equals(audit.getStringValue("submittedBy")) &&
             !user.toString().equals(audit.getStringValue("authoredBy")) && !user.equals(draft.getCreatorReference()),
             "You cannot approve, publish or reject your own article submission.");
+    }
+
+    boolean canWithdraw(XWikiDocument draft, XWikiContext context) throws Exception {
+        DocumentReference reference = draft.getDocumentReference();
+        DocumentReference user = context.getUserReference();
+        BaseObject flow = draft.getObject(WF);
+        if (user == null || !reference.getWikiReference().getName().equals(context.getWikiId()) ||
+            !reference.getSpaceReferences().get(0).getName().equals("Drafts") || flow == null ||
+            flow.getIntValue("istarget") != 0 || flow.getIntValue("includeChildren") != 0 ||
+            !List.of("moderating", "validating").contains(status(flow)) ||
+            !authorization.hasAccess(Right.VIEW, user, reference)) { return false; }
+        if (authorization.hasAccess(Right.ADMIN, user,
+            new DocumentReference(context.getWikiId(), "XWiki", "XWikiPreferences"))) { return true; }
+        BaseObject audit = draft.getObject(AUDIT);
+        return groups(user, context).contains(context.getWikiId() + ":XWiki.LuxEditors") &&
+            audit != null && user.toString().equals(audit.getStringValue("submittedBy"));
     }
 
     void validWorkflow(BaseObject object, DocumentReference source, XWikiContext context) throws Exception {
@@ -260,11 +286,12 @@ public class WorkflowPolicyListener implements EventListener
     /** Trust Java API execution, never an HTTP action parameter or a client-set flag. */
     String workflowOperation() {
         return StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE).walk(frames -> frames
-            .filter(frame -> frame.getClassName().equals("org.xwiki.workflowpublication.internal.DefaultPublicationWorkflow"))
-            .map(StackWalker.StackFrame::getMethodName)
-            .filter(name -> Set.of("startWorkflow", "startWorkflowAsTarget", "createDraftDocument", "editDraft",
+            .filter(frame -> (frame.getDeclaringClass() == WorkflowPolicyScriptService.class && frame.getMethodName().equals("withdraw")) ||
+                (frame.getClassName().equals("org.xwiki.workflowpublication.internal.DefaultPublicationWorkflow") &&
+                Set.of("startWorkflow", "startWorkflowAsTarget", "createDraftDocument", "editDraft",
                 "submitForModeration", "submitForValidation", "validate", "publish", "refuseValidation",
-                "refuseModeration", "archive", "unpublish", "unarchive", "publishFromArchive").contains(name))
+                "refuseModeration", "archive", "unpublish", "unarchive", "publishFromArchive").contains(frame.getMethodName())))
+            .map(frame -> frame.getDeclaringClass() == WorkflowPolicyScriptService.class ? "withdrawSubmission" : frame.getMethodName())
             .findFirst().orElse(""));
     }
 
@@ -291,7 +318,7 @@ public class WorkflowPolicyListener implements EventListener
         require(drafts.size() == 1, "A unique matching draft workflow is required.");
         return resolver.resolve(drafts.get(0), target);
     }
-    public String getPolicyVersion() { return "luxpedia-workflow-policy-1"; }
+    public String getPolicyVersion() { return "luxpedia-workflow-policy-2"; }
     /** Deployment migration: remove historical validator EDIT grants without re-authoring content. */
     public int repairExistingDraftRights(XWikiContext context) throws Exception {
         require(authorization.hasAccess(Right.ADMIN, context.getUserReference(),
@@ -309,12 +336,39 @@ public class WorkflowPolicyListener implements EventListener
             XWikiDocument original = context.getWiki().getDocument(reference, context);
             XWikiDocument draft = original.clone();
             normalizeDraftRights(draft, status(draft.getObject(WF)), context);
-            draft.setHidden(false);
+            draft.setHidden(status(draft.getObject(WF)).equals("published"));
             draft.setContentAuthorReference(original.getContentAuthorReference());
             context.getWiki().saveDocument(draft, "Normalize LuxPedia workflow role permissions", true, context);
             repaired++;
         }
         return repaired;
+    }
+    /** Register legacy articles at every Knowledge depth so all editors can open a linked draft. */
+    public int registerExistingKnowledgeTargets(XWikiContext context) throws Exception {
+        require(authorization.hasAccess(Right.ADMIN, context.getUserReference(),
+            new DocumentReference(context.getWikiId(), "XWiki", "XWikiPreferences")), "Administrator required.");
+        List<String> articles = queries.createQuery("where (doc.space = 'Knowledge' or doc.space like 'Knowledge.%') " +
+            "and doc.name <> 'WebPreferences' and doc.language = ''", Query.XWQL).setWiki(context.getWikiId()).execute();
+        WikiReference wikiReference = new WikiReference(context.getWikiId());
+        int registered = 0;
+        for (String name : articles) {
+            DocumentReference reference = resolver.resolve(name, wikiReference);
+            require(reference.getWikiReference().equals(wikiReference) &&
+                reference.getSpaceReferences().get(0).getName().equals("Knowledge"), "Knowledge migration scope exceeded.");
+            XWikiDocument original = context.getWiki().getDocument(reference, context);
+            if (original.isNew() || original.getObject(WF) != null || !validTarget(reference, context)) { continue; }
+            XWikiDocument article = original.clone();
+            BaseObject flow = article.newXObject(resolver.resolve(WF, reference), context);
+            flow.set("status", "published", context);
+            flow.set("workflow", "LuxPedia.Workflow.Config", context);
+            flow.set("target", localSerializer.serialize(reference), context);
+            flow.set("istarget", 1, context);
+            flow.set("includeChildren", 0, context);
+            article.setContentAuthorReference(original.getContentAuthorReference());
+            context.getWiki().saveDocument(article, "Register existing article for reviewed changes", true, context);
+            registered++;
+        }
+        return registered;
     }
     private static String legacyMetadata() {
         try (var stream = WorkflowPolicyListener.class.getResourceAsStream("/legacy-article-metadata.xwiki")) {

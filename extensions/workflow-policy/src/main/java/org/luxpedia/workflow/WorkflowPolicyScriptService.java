@@ -7,6 +7,7 @@ import org.xwiki.component.annotation.Component;
 import org.xwiki.context.Execution;
 import org.xwiki.csrf.CSRFToken;
 import org.xwiki.model.reference.DocumentReference;
+import org.xwiki.model.reference.WikiReference;
 import org.xwiki.observation.EventListener;
 import org.xwiki.script.service.ScriptService;
 import org.xwiki.security.authorization.AuthorizationManager;
@@ -16,7 +17,7 @@ import com.xpn.xwiki.doc.XWikiDocument;
 import com.xpn.xwiki.objects.classes.BaseClass;
 import java.util.List;
 
-/** Fixed administrator operations; callers never need Groovy/programming rights or a raw context. */
+/** Fixed authorized workflow operations; callers never receive a raw context. */
 @Component
 @Named("luxpediaWorkflowPolicy")
 @Singleton
@@ -57,6 +58,40 @@ public class WorkflowPolicyScriptService implements ScriptService
         if (schema.get("submittedVersion") == null) { changed |= schema.addTextField("submittedVersion", "Submitted version", 30); }
         if (changed) { context.getWiki().saveDocument(audit, "Ensure review audit fields", true, context); }
         ((WorkflowPolicyListener) listener).repairExistingDraftRights(context);
+        ((WorkflowPolicyListener) listener).registerExistingKnowledgeTargets(context);
         return "AUDIT_CLASS_READY";
+    }
+
+    XWikiDocument withdrawalDraft(String name, XWikiContext context) throws Exception {
+        if (name == null || name.isBlank() || context.getUserReference() == null) { return null; }
+        var policy = (WorkflowPolicyListener) listener;
+        DocumentReference ref = policy.resolver.resolve(name, new WikiReference(context.getWikiId()));
+        if (!ref.getWikiReference().getName().equals(context.getWikiId()) ||
+            !ref.getSpaceReferences().get(0).getName().equals("Drafts")) { return null; }
+        XWikiDocument draft = context.getWiki().getDocument(ref, context);
+        return policy.canWithdraw(draft, context) ? draft : null;
+    }
+
+    public String withdrawVersion(String name) throws Exception {
+        XWikiDocument draft = withdrawalDraft(name, context());
+        return draft == null ? "" : draft.getVersion();
+    }
+
+    public String withdraw(String name, String version, String token) throws Exception {
+        XWikiContext context = context();
+        if (context.getRequest() == null || !"POST".equals(context.getRequest().getMethod())) {
+            return "POLICY_POST_REQUIRED";
+        }
+        if (!csrf.isTokenValid(token)) { return "POLICY_BAD_TOKEN"; }
+        XWikiDocument original = withdrawalDraft(name, context);
+        if (original == null) { return "WITHDRAW_FORBIDDEN"; }
+        if (!original.getVersion().equals(version)) { return "WITHDRAW_CONFLICT"; }
+        XWikiDocument draft = original.clone();
+        draft.getObject(WorkflowPolicyListener.WF).set("status", "draft", context);
+        ((WorkflowPolicyListener) listener).normalizeDraftRights(draft, "draft", context);
+        draft.setHidden(false);
+        draft.setContentAuthorReference(original.getContentAuthorReference());
+        context.getWiki().saveDocument(draft, "Withdraw publication review request", true, context);
+        return "WITHDRAWN";
     }
 }

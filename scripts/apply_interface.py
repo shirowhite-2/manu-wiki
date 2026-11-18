@@ -52,7 +52,7 @@ PAGES = {
 #end
 
 [[#lp('queue')>>PublicationWorkflow.Overview]] · [[#lp('editGuide')>>LuxPedia.Help.EditGuide]]
-''' + END + '\n\n{{documents space="Drafts" count="100" actions="false" columns="doc.title, doc.location"/}}'),
+''' + (UI / 'pages/drafts.xwiki').read_text() + END),
     ("LuxPedia/Help", "EditGuide"): ("editGuide", V + "= #lp('editGuide') =\n\n#lp('guideContent')\n" + END),
     ("LuxPedia/Help", "WebHome"): ("help", V + "= #lp('help') =\n\n#lp('guideContent')\n" + END),
     ("LuxPedia/About", "WebHome"): ("about", V + "= #lp('about') =\n\n#lp('aboutContent')\n" + END),

@@ -151,6 +151,40 @@ class WorkflowPolicyListenerTest {
     @Test void submittedContentIsLockedForEditor() {
         states("validating", "validating"); assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
     }
+    @Test void submitterCanWithdrawPendingRequestAndRestoreEditing() throws Exception {
+        states("validating", "draft"); audit(old, "currentUser"); policy.operation = "withdrawSubmission";
+        assertDoesNotThrow(() -> policy.check(doc, context, false));
+        verify(doc).setHidden(false);
+        verify(doc).removeObjects("XWiki.XWikiRights");
+    }
+    @Test void anotherEditorCannotWithdrawSomeoneElsesRequest() throws Exception {
+        states("validating", "draft"); audit(old, "anotherEditor"); policy.operation = "withdrawSubmission";
+        assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
+    }
+    @Test void reviewerCannotUseWithdrawalAsAReviewDecision() throws Exception {
+        group("Reviewers"); states("validating", "draft"); audit(old, "currentUser");
+        assertFalse(policy.canWithdraw(old, context));
+    }
+    @Test void approvedOrPublishedRequestsCannotBeWithdrawn() throws Exception {
+        audit(old, "currentUser");
+        for (String state : List.of("draft", "valid", "published", "archived")) {
+            states(state, "draft"); assertFalse(policy.canWithdraw(old, context));
+        }
+    }
+    @Test void invisibleDraftCannotBeWithdrawn() throws Exception {
+        states("validating", "draft"); audit(old, "currentUser");
+        when(policy.authorization.hasAccess(Right.VIEW, user, old.getDocumentReference())).thenReturn(false);
+        assertFalse(policy.canWithdraw(old, context));
+    }
+    @Test void publicationHidesWorkingCopyAndReopeningRestoresIt() throws Exception {
+        group("Reviewers"); states("validating", "published"); audit(old, "otherEditor"); policy.operation = "publish";
+        policy.check(doc, context, false); verify(doc).setHidden(true);
+        reset(doc); when(doc.getDocumentReference()).thenReturn(ref("Drafts.Article.WebHome"));
+        when(doc.getOriginalDocument()).thenReturn(old);
+        when(doc.newXObject(any(DocumentReference.class), eq(context))).thenReturn(mock(BaseObject.class));
+        group("Editors"); states("published", "draft"); policy.operation = "editDraft";
+        policy.check(doc, context, false); verify(doc).setHidden(false);
+    }
     @Test void reviewerCannotChangeDraftBody() throws Exception {
         group("Reviewers"); states("draft", "draft");
         assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
@@ -286,6 +320,11 @@ class WorkflowPolicyListenerTest {
         when(policy.authorization.hasAccess(eq(Right.ADMIN), eq(user), any())).thenReturn(true);
         states(null, "published"); assertDoesNotThrow(() -> policy.check(doc, context, true));
     }
+    @Test void administratorPublicationAlsoHidesTheWorkingCopy() throws Exception {
+        when(policy.authorization.hasAccess(eq(Right.ADMIN), eq(user), any())).thenReturn(true);
+        states("validating", "published"); policy.operation = "publish";
+        policy.check(doc, context, false); verify(doc).setHidden(true);
+    }
     @Test void httpParametersDoNotCountAsNativeWorkflowExecution() {
         assertEquals("", new WorkflowPolicyListener().workflowOperation());
     }
@@ -337,6 +376,32 @@ class WorkflowPolicyListenerTest {
     }
     @Test void historicalRightsRepairRequiresAdministrator() {
         assertThrows(SecurityException.class, () -> policy.repairExistingDraftRights(context));
+    }
+    @Test void knowledgeRegistrationRequiresAdministrator() {
+        assertThrows(SecurityException.class, () -> policy.registerExistingKnowledgeTargets(context));
+    }
+    @Test void legacyRegistrationCoversRootAndNestedArticlesWithoutRewritingBodies() throws Exception {
+        when(policy.authorization.hasAccess(eq(Right.ADMIN), eq(user), any())).thenReturn(true);
+        policy.resolver = realResolver();
+        policy.localSerializer = mock(EntityReferenceSerializer.class);
+        when(policy.localSerializer.serialize(any())).thenAnswer(call -> call.getArgument(0).toString().replace("xwiki:", ""));
+        policy.queries = mock(QueryManager.class); Query query = mock(Query.class, RETURNS_SELF);
+        when(policy.queries.createQuery(anyString(), eq(Query.XWQL))).thenReturn(query);
+        when(query.execute()).thenReturn(List.of("Knowledge.Article", "Knowledge.Category.Nested.Article", "Knowledge.CategoryAdmin"));
+        for (String name : List.of("Knowledge.Article", "Knowledge.Category.Nested.Article")) {
+            XWikiDocument original = document(name), registered = document(name);
+            documents.put(ref(name), original); when(original.clone()).thenReturn(registered);
+            when(original.getContentAuthorReference()).thenReturn(ref("XWiki.author"));
+        }
+        XWikiDocument root = documents.get(ref("Knowledge.Article"));
+        XWikiDocument nested = documents.get(ref("Knowledge.Category.Nested.Article"));
+        assertEquals(2, policy.registerExistingKnowledgeTargets(context));
+        for (XWikiDocument original : List.of(root, nested)) {
+            XWikiDocument saved = original.clone();
+            verify(saved).setContentAuthorReference(ref("XWiki.author"));
+            verify(saved, never()).setContent(anyString());
+            verify(wiki).saveDocument(saved, "Register existing article for reviewed changes", true, context);
+        }
     }
     @Test void historicalRightsRepairPreservesContentAuthor() throws Exception {
         when(policy.authorization.hasAccess(eq(Right.ADMIN), eq(user), any())).thenReturn(true);

@@ -1,0 +1,28 @@
+#set($articles = $services.query.xwql("where (doc.space = 'Drafts' or doc.space like 'Drafts.%') and doc.name <> 'WebPreferences' and doc.language = '' order by doc.date desc").execute())
+#set($visible = false)
+
+
+{{html clean="false"}}
+<table class="table table-striped luxpedia-system-list" style="width:100%;table-layout:fixed;overflow-wrap:anywhere">
+<thead><tr><th scope="col">#lp('title')</th><th scope="col">#lp('status')</th><th scope="col">#lp('destination')</th></tr></thead>
+<tbody>
+#foreach($item in $articles)
+#if($item != 'Drafts.WebHome')
+#set($draft = $xwiki.getDocument($item))
+#if($draft.hasAccessLevel('view'))
+#set($flow = $draft.getObject('PublicationWorkflow.PublicationWorkflowClass'))
+#set($state = 'unstarted')
+#if($flow)#set($state = $flow.getValue('status'))#end
+#if($state != 'published' && $state != 'archived')
+#set($visible = true)
+<tr><td><a href="$escapetool.xml($xwiki.getURL($item))">$escapetool.xml($draft.displayTitle)</a></td><td>#lp($state)</td><td>#if($flow)$escapetool.xml($!flow.getValue('target'))#else#lp('destinationPending')#end</td></tr>
+#end
+#end
+#end
+#end
+#if(!$visible)
+<tr><td colspan="3">#lp('draftsEmpty')</td></tr>
+#end
+</tbody>
+</table>
+{{/html}}

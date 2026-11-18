@@ -1,4 +1,4 @@
-#set($cats = $services.query.xwql("from doc.object(LuxPedia.Code.CategoryClass) as c where doc.name = 'WebHome' and doc.space like 'Knowledge.%' order by doc.title").execute())
+#set($cats = $services.query.xwql("from doc.object(LuxPedia.Code.CategoryClass) as c where doc.name = 'WebHome' and doc.space like 'Knowledge.%' and doc.language = '' order by doc.title").execute())
 #set($visible = false)
 
 

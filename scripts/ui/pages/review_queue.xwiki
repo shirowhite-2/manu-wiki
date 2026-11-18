@@ -1,4 +1,4 @@
-#set($articles = $services.query.xwql("from doc.object(PublicationWorkflow.PublicationWorkflowClass) as wf where wf.istarget = 0 and wf.status = 'validating' and (doc.space = 'Drafts' or doc.space like 'Drafts.%') order by doc.date asc").execute())
+#set($articles = $services.query.xwql("from doc.object(PublicationWorkflow.PublicationWorkflowClass) as wf where wf.istarget = 0 and wf.status = 'validating' and (doc.space = 'Drafts' or doc.space like 'Drafts.%') and doc.language = '' order by doc.date asc").execute())
 #set($visible = false)
 
 

@@ -65,6 +65,7 @@ WORKFLOW_UX_JS = r"""(function () {
   var uiRoles = null;
 
   /* LUXPEDIA_WORKFLOW_PANEL */
+  /* LUXPEDIA_DRAFT_ACTIONS */
 
   function documentReference() {
     var meta = document.querySelector('meta[name="document"]');
@@ -407,33 +408,35 @@ WORKFLOW_UX_JS = r"""(function () {
         return 'waiting';
       });
     }).then(function (state) {
-      if (state === 'done') { return; }
+      if (state === 'done') { busy = false; renderDraftActions(); return; }
       if (state === 'waiting') {
         busy = false;
         setTimeout(function () { continuePendingSubmission(reference); }, 900);
       }
       // After starting or submitting, XWiki redirects/reloads the same page. The
       // session flag and busy lock stay set until the new document is loaded.
-    }).catch(function () { busy = false; });
+    }).catch(function () { busy = false; renderDraftActions(); });
   }
 
   function installDoneButton(reference, isAdmin) {
     if (isAdmin || !location.pathname.match(/^\/bin\/edit\/Drafts(?:\/|$)/)) { return true; }
-    var done = document.querySelector('button.realtime-action-done');
+    var done = document.querySelector('button.realtime-action-done, input[name="action_save"], button[name="action_save"]');
     if (!done) { return false; }
-    if (done.getAttribute('data-luxpedia-submit-bound') === '1') { return true; }
-    done.setAttribute('data-luxpedia-submit-bound', '1');
-    done.title = t('saveSubmit');
+    if (done.getAttribute('data-luxpedia-preview-bound') === '1') { return true; }
+    done.setAttribute('data-luxpedia-preview-bound', '1');
+    done.title = t('savePreview');
     Array.from(done.childNodes).forEach(function (node) {
       if (node.nodeType === Node.TEXT_NODE) { node.textContent = ''; }
     });
     var text = Array.from(done.querySelectorAll('*')).find(function (node) {
       return node.childElementCount === 0 && node.textContent.trim() === 'Done';
     });
-    if (text) { text.textContent = t('saveSubmit'); }
-    else { done.appendChild(document.createTextNode(t('saveSubmit'))); }
+    if (done.tagName === 'INPUT') { done.value = t('savePreview'); }
+    else if (text) { text.textContent = t('savePreview'); }
+    else { done.appendChild(document.createTextNode(t('savePreview'))); }
     done.addEventListener('click', function () {
-      sessionStorage.setItem(PREFIX + reference, '1');
+      sessionStorage.removeItem(PREFIX + reference);
+      sessionStorage.setItem(PREVIEW_PREFIX + reference, '1');
       var category = document.querySelector('#luxpedia-publish-category');
       if (category) {
         var option = category.options[category.selectedIndex];
@@ -585,7 +588,8 @@ WORKFLOW_UX_JS = r"""(function () {
 """
 
 WORKFLOW_UX_JS = I18N_JS + WORKFLOW_UX_JS.replace(
-    '/* LUXPEDIA_WORKFLOW_PANEL */', (UI / 'workflow_panel.js').read_text())
+    '/* LUXPEDIA_WORKFLOW_PANEL */', (UI / 'workflow_panel.js').read_text()).replace(
+    '/* LUXPEDIA_DRAFT_ACTIONS */', (UI / 'draft_actions.js').read_text())
 
 WORKFLOW_UX_PROPERTIES = {
     "name": "luxpedia.workflowUX",
@@ -843,8 +847,8 @@ def apply(module, wiki):
     wiki.ensure_object_values("Knowledge", "WebPreferences", "XWiki.XWikiPreferences", PANEL_VALUES)
     module.log("== connect existing published articles and drafts")
     bootstrap_workflow_targets(module, wiki)
-    module.log("== editor save-and-submit workflow UX")
-    wiki.ensure_page(UX_SPACE, UX_PAGE, "Workflow UX script", "Automatic destination selection and editor save-and-submit behavior.", hidden=True)
+    module.log("== editor save, preview and review workflow UX")
+    wiki.ensure_page(UX_SPACE, UX_PAGE, "Workflow UX script", "Draft preview, explicit review submission and withdrawal controls.", hidden=True)
     wiki.ensure_object_values(UX_SPACE, UX_PAGE, "XWiki.JavaScriptExtension", WORKFLOW_UX_PROPERTIES)
     apply_interface(module, wiki)
     # Update auxiliary controls to use the same persisted interface language.

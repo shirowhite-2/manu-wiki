@@ -41,10 +41,12 @@ class InterfaceRenderingTest {
         public List<String> execute() { return items; }
     }
     public static class Fields {
+        final String name;
+        Fields(String name) { this.name = name; }
         public String getValue(String field) {
             return switch (field) {
                 case "target" -> "Knowledge.Technical." + "LongArticleName".repeat(30);
-                case "status" -> "validating";
+                case "status" -> name.startsWith("Published ") ? "published" : name.startsWith("Archived ") ? "archived" : "validating";
                 case "description" -> "User category <script>text</script>";
                 default -> "User value | <text>";
             };
@@ -56,7 +58,7 @@ class InterfaceRenderingTest {
         Page(String name, boolean visible) { this.name = name; this.visible = visible; }
         public boolean hasAccessLevel(String right) { return visible; }
         public String getDisplayTitle() { return name; }
-        public Fields getObject(String className) { return new Fields(); }
+        public Fields getObject(String className) { return new Fields(name); }
     }
     public static class Wiki {
         public Page getDocument(String reference) {
@@ -107,7 +109,7 @@ class InterfaceRenderingTest {
         context.setRoleType(ComponentManager.class); context.setRoleHint("context");
         manager.registerComponent(context, manager);
         Parser parser = manager.getInstance(Parser.class, "xwiki/2.1");
-        for (String name : List.of("review_queue", "categories", "articles")) {
+        for (String name : List.of("review_queue", "categories", "articles", "drafts")) {
             var xdom = parser.parse(new StringReader(renderSource(name, "en", List.of("First", "Second"))));
             var macros = xdom.<MacroBlock>getBlocks(new ClassBlockMatcher(MacroBlock.class), Block.Axes.DESCENDANT);
             assertEquals(1, macros.size());
@@ -149,5 +151,11 @@ class InterfaceRenderingTest {
             assertEquals(3, table.getElementsByTagName("tr").getLength());
             assertEquals(name.equals("categories") ? 4 : 8, table.getElementsByTagName("td").getLength());
         }
+    }
+    @Test void activeDraftsHidePublishedAndArchivedCopiesButKeepEditableAndPendingArticles() throws Exception {
+        var table = parse(render("drafts", "en", List.of("First", "Published", "Archived", "Hidden", "Second", "Drafts.WebHome")));
+        assertEquals(3, table.getElementsByTagName("tr").getLength());
+        assertFalse(table.getDocumentElement().getTextContent().contains("Published"));
+        assertFalse(table.getDocumentElement().getTextContent().contains("Archived"));
     }
 }

@@ -24,19 +24,22 @@ after(async () => { await browser?.close(); });
 async function wikiFixture(options = {}) {
   const context = await browser.newContext();
   const page = await context.newPage();
-  const reference = options.reference || 'Drafts.NewArticle.WebHome';
-  const viewPath = '/bin/view/' + reference.split('.').join('/');
-  const editPath = viewPath.replace('/view/', '/edit/');
+  let reference = options.reference || 'Drafts.NewArticle.WebHome';
+  let viewPath = '/bin/view/' + reference.split('.').join('/');
+  let editPath = viewPath.replace('/view/', '/edit/');
   const pendingKey = prefix + reference;
   const state = {
     status: options.status || (options.linkedTarget ? 'draft' : ''),
     target: options.linkedTarget || '',
     category: options.primaryCategory || '',
     hasArticle: options.hasArticle !== false,
-    actions: [], alerts: [], errors: [],
+    actions: [], alerts: [], errors: [], withdrawals: [], confirmations: 0,
   };
   page.on('pageerror', error => state.errors.push(error.message));
-  page.on('dialog', async dialog => { state.alerts.push(dialog.message()); await dialog.accept(); });
+  page.on('dialog', async dialog => {
+    if (dialog.type() === 'confirm') { state.confirmations++; } else { state.alerts.push(dialog.message()); }
+    await dialog.accept();
+  });
   function form(action, fields = '') {
     return `<form method="post" action="/bin/view/PublicationWorkflow/Script">
       <input name="action" type="hidden" value="${action}">
@@ -70,6 +73,17 @@ async function wikiFixture(options = {}) {
     const url = new URL(request.url());
     const pathname = decodeURIComponent(url.pathname);
     const json = body => route.fulfill({ json: body });
+    if (pathname === '/bin/get/LuxPedia/Workflow/Actions') {
+      if (request.method() === 'GET') {
+        return route.fulfill({ body: 'WITHDRAW_VERSION=' + (options.ownSubmission !== false && state.status === 'validating' ? '4.2' : '') });
+      }
+      const fields = Object.fromEntries(new URLSearchParams(request.postData()));
+      state.withdrawals.push(fields);
+      if (options.withdrawFail || fields.version !== '4.2' || fields.form_token !== 'test-token') {
+        return route.fulfill({ body: 'WITHDRAW_CONFLICT' });
+      }
+      state.status = 'draft'; return route.fulfill({ body: 'WITHDRAWN' });
+    }
     if (pathname.endsWith('/PublicationWorkflow/Script')) {
       const fields = Object.fromEntries(new URLSearchParams(request.postData()));
       state.actions.push(fields);
@@ -87,6 +101,11 @@ async function wikiFixture(options = {}) {
       } else if (fields.action === 'submitformoderation') {
         assert.equal(state.status, 'draft');
         state.status = 'validating'; // two-role config has no moderator
+      } else if (fields.action === 'getEditableDraft') {
+        reference = options.draftReference || 'Drafts.Linked.Article';
+        viewPath = '/bin/view/' + reference.split('.').join('/');
+        editPath = viewPath.replace('/view/', '/edit/');
+        state.status = 'draft';
       }
       return route.fulfill({ status: 303, headers: { location: viewPath + query }, body: '' });
     }
@@ -153,7 +172,7 @@ async function wikiFixture(options = {}) {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = 'http://127.0.0.1:' + server.address().port;
   context.on('close', () => server.close());
-  async function submit(category) {
+  async function preview(category) {
     await page.goto(origin + editPath);
     if (!options.linkedTarget) {
       await page.locator('#luxpedia-publish-category').waitFor();
@@ -163,8 +182,14 @@ async function wikiFixture(options = {}) {
       assert.equal(await page.locator('#luxpedia-publish-category').count(), 0);
     }
     await page.waitForFunction(() => document.querySelector('.realtime-action-done')
-      ?.getAttribute('data-luxpedia-submit-bound') === '1');
+      ?.getAttribute('data-luxpedia-preview-bound') === '1');
     await page.locator('.realtime-action-done').click();
+    await page.waitForFunction(() => document.querySelector('#luxpedia-submit-review') &&
+      !document.querySelector('#luxpedia-submit-review').disabled);
+  }
+  async function submit(category) {
+    await preview(category);
+    await page.locator('#luxpedia-submit-review').click();
   }
   async function expectPending(target) {
     try {
@@ -187,7 +212,7 @@ async function wikiFixture(options = {}) {
       assert.equal(start.workflow, 'LuxPedia.Workflow.Config');
     }
   }
-  return { context, page, state, submit, expectPending, pendingKey, origin };
+  return { context, page, state, preview, submit, expectPending, pendingKey, origin };
 }
 
 for (const scenario of [
@@ -299,8 +324,9 @@ test('language switching in the editor preserves unsaved text and the selected c
     assert.equal(wiki.page.url(), url);
     assert.equal(await wiki.page.locator('#xwikieditor').inputValue(), 'Unsaved text 未保存的正文');
     assert.equal(await wiki.page.locator('#luxpedia-publish-category').inputValue(), 'Technical');
-    assert.equal(await wiki.page.locator('.realtime-action-done').textContent(), '保存并提交审核');
+    assert.equal(await wiki.page.locator('.realtime-action-done').textContent(), '保存草稿并预览');
     await wiki.page.locator('.realtime-action-done').click();
+    await wiki.page.locator('#luxpedia-submit-review').click();
     await wiki.expectPending('Knowledge.Technical.NewArticle');
   } finally { await wiki.context.close(); }
 });
@@ -380,4 +406,68 @@ test('rendered review queue keeps separate rows and fits desktop and mobile widt
       assert.deepEqual(await page.locator('th').allTextContents(), ['Title', 'Status', 'Publication location']);
     }
   } finally { await page.close(); }
+});
+
+test('saving opens the rendered preview without starting or submitting a workflow', async () => {
+  const wiki = await wikiFixture();
+  try {
+    await wiki.preview('Technical');
+    assert.equal(new URL(wiki.page.url()).pathname, '/bin/view/Drafts/NewArticle/WebHome');
+    assert.equal(wiki.state.status, '');
+    assert.equal(wiki.state.actions.length, 0);
+    assert.equal(wiki.state.category, '技术文档');
+    assert.equal(await wiki.page.locator('#user-content').textContent(), '用户撰写的正文 stays unchanged.');
+    await wiki.page.locator('#luxpedia-continue-editing').click();
+    await wiki.page.waitForURL(/\/bin\/edit\//);
+    assert.equal(wiki.state.actions.length, 0);
+  } finally { await wiki.context.close(); }
+});
+
+test('submitter can withdraw a pending request using POST and CSRF then edit again', async () => {
+  const wiki = await wikiFixture({ status: 'validating', linkedTarget: 'Knowledge.Technical.Article' });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/view/Drafts/NewArticle/WebHome');
+    await wiki.page.locator('#luxpedia-withdraw-review').click();
+    await wiki.page.locator('#luxpedia-continue-editing').waitFor();
+    assert.equal(wiki.state.status, 'draft');
+    assert.equal(wiki.state.withdrawals.length, 1);
+    assert.equal(wiki.state.withdrawals[0].reference, 'Drafts.NewArticle.WebHome');
+    assert.equal(wiki.state.withdrawals[0].form_token, 'test-token');
+    assert.equal(wiki.state.withdrawals[0].version, '4.2');
+    assert.equal(wiki.state.confirmations, 1);
+    assert.deepEqual(wiki.state.alerts, []);
+  } finally { await wiki.context.close(); }
+});
+
+test('another editor sees no withdrawal action for someone elses submission', async () => {
+  const wiki = await wikiFixture({ status: 'validating', ownSubmission: false });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/view/Drafts/NewArticle/WebHome');
+    await wiki.page.waitForFunction(() => document.querySelector('.luxpedia-state')?.textContent === 'Awaiting review');
+    assert.equal(await wiki.page.locator('#luxpedia-withdraw-review').count(), 0);
+    assert.equal(wiki.state.withdrawals.length, 0);
+  } finally { await wiki.context.close(); }
+});
+
+test('a stale withdrawal keeps the article pending and reports failure', async () => {
+  const wiki = await wikiFixture({ status: 'validating', withdrawFail: true });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/view/Drafts/NewArticle/WebHome');
+    await wiki.page.locator('#luxpedia-withdraw-review').click();
+    await wiki.page.waitForFunction(() => !document.querySelector('#luxpedia-withdraw-review').disabled);
+    assert.equal(wiki.state.status, 'validating');
+    assert.match(wiki.state.alerts[0], /could not be withdrawn/);
+  } finally { await wiki.context.close(); }
+});
+
+test('an editor opens a linked draft from Knowledge while keeping the published target', async () => {
+  const wiki = await wikiFixture({ reference: 'Knowledge.Technical.Article', status: 'published', linkedTarget: 'Knowledge.Technical.Article' });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/view/Knowledge/Technical/Article');
+    await wiki.page.locator('#luxpedia-edit-article').click();
+    await wiki.page.waitForURL(/\/bin\/edit\/Drafts\/Linked\/Article/);
+    assert.equal(wiki.state.target, 'Knowledge.Technical.Article');
+    assert.deepEqual(wiki.state.actions.map(action => action.action), ['getEditableDraft']);
+    assert.equal(wiki.state.status, 'draft');
+  } finally { await wiki.context.close(); }
 });

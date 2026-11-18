@@ -61,7 +61,7 @@ class FakeWiki:
     def request(self, method, path, data=None, content_type=None, **kwargs):
         self.requests.append((method, path, data))
         if 'PolicyStatus?' in path:
-            return 200, b'luxpedia-workflow-policy-1' if self.policy else b'POLICY_NOT_INSTALLED'
+            return 200, b'luxpedia-workflow-policy-2' if self.policy else b'POLICY_NOT_INSTALLED'
         if 'PolicySetup?' in path:
             return 200, b'AUDIT_CLASS_READY'
         if '/translations/' in path:
@@ -256,7 +256,7 @@ class InterfaceConfigTest(unittest.TestCase):
         self.assertIn('custom.key=preserved', content)
         self.assertIn('workflow.title=Publication', content)
 
-    def test_draft_list_is_a_standalone_block_in_both_languages(self):
+    def test_active_draft_list_excludes_published_copies_in_both_languages(self):
         wiki = FakeWiki()
         interface.apply(Module, wiki)
         english = wiki.pages[('Drafts', 'WebHome')][1]
@@ -265,8 +265,22 @@ class InterfaceConfigTest(unittest.TestCase):
                         if method == 'PUT' and path.endswith('/Drafts/pages/WebHome/translations/zh')]
         self.assertEqual(len(translations), 1)
         for content in [english, *translations]:
-            self.assertIn('{{/velocity}}\n\n{{documents ', content)
-            self.assertEqual(content.count('{{documents '), 1)
+            self.assertIn("$state != 'published' && $state != 'archived'", content)
+            self.assertIn('luxpedia-system-list', content)
+            self.assertNotIn('{{documents ', content)
+
+    def test_old_policy_stops_before_new_workflow_features_are_deployed(self):
+        wiki = FakeWiki()
+        original = wiki.request
+        def request(method, path, *args, **kwargs):
+            if 'PolicyStatus?' in path:
+                return 200, b'luxpedia-workflow-policy-1'
+            return original(method, path, *args, **kwargs)
+        wiki.request = request
+        with self.assertRaisesRegex(RuntimeError, 'Install or update workflow-policy'):
+            security.apply(Module, wiki)
+        self.assertEqual(wiki.rights, [])
+        self.assertNotIn(('LuxPedia/Workflow', 'Actions'), wiki.pages)
 
     def test_security_setup_stops_when_component_is_missing(self):
         wiki = FakeWiki(policy=False)
@@ -304,11 +318,11 @@ class InterfaceConfigTest(unittest.TestCase):
     def test_script_denial_is_not_reported_as_a_missing_jar(self):
         body = b'Failed to execute the [groovy] macro. The execution of the [groovy] script macro is not allowed.'
         with self.assertRaisesRegex(RuntimeError, 'page author cannot execute'):
-            security.verify_response(200, body, 'luxpedia-workflow-policy-1', 'PolicyStatus')
+            security.verify_response(200, body, 'luxpedia-workflow-policy-2', 'PolicyStatus')
 
     def test_policy_marker_accepts_plain_or_rendered_output(self):
-        for body in (b'luxpedia-workflow-policy-1\n', b'<p>luxpedia-workflow-policy-1</p>'):
-            security.verify_response(200, body, 'luxpedia-workflow-policy-1', 'PolicyStatus')
+        for body in (b'luxpedia-workflow-policy-2\n', b'<p>luxpedia-workflow-policy-2</p>'):
+            security.verify_response(200, body, 'luxpedia-workflow-policy-2', 'PolicyStatus')
 
     def test_admin_and_token_errors_are_distinct(self):
         with self.assertRaisesRegex(RuntimeError, 'wiki-level administrator'):

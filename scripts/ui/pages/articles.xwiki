@@ -1,4 +1,4 @@
-#set($articles = $services.query.xwql("from doc.object(LuxPedia.Code.ArticleClass) as article where (doc.space = 'Knowledge' or doc.space like 'Knowledge.%') order by doc.date desc").execute())
+#set($articles = $services.query.xwql("from doc.object(LuxPedia.Code.ArticleClass) as article where (doc.space = 'Knowledge' or doc.space like 'Knowledge.%') and doc.language = '' order by doc.date desc").execute())
 #set($visible = false)
 
 
