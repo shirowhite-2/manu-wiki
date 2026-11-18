@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: mvn -B -f extensions/workflow-policy/pom.xml verify
-      - run: python3 -m unittest discover -s tests -p interface_config_test.py -v
+      - run: python3 -m unittest discover -s tests -p '*_test.py' -v
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run test:ui

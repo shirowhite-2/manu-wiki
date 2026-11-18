@@ -18,7 +18,7 @@
     if (!uiRoles || (!uiRoles.editor && !uiRoles.admin) || location.pathname.indexOf('/bin/view/') !== 0) { return; }
     var reference = documentReference();
     var draft = reference.indexOf('Drafts.') === 0 && reference !== 'Drafts.WebHome';
-    var knowledge = reference.indexOf('Knowledge.') === 0 && reference !== 'Knowledge.WebHome';
+    var knowledge = reference.indexOf('Knowledge.') === 0;
     var content = document.getElementById('xwikicontent');
     if ((!draft && !knowledge) || !content) { return; }
     if (!draftActionsSnapshot && !draftActionsLoading) {

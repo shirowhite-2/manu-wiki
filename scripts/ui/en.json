@@ -76,7 +76,7 @@
   "categoryCreated": "Category created.",
   "categoryExists": "This category key already exists.",
   "invalidToken": "Invalid form token. Reload the page and try again.",
-  "guideContent": "Editors can propose changes to any article. In Knowledge, choose Edit article to open its linked draft. Choose a category, then Save draft and preview. Check the rendered page and click Submit for review. The submitter may withdraw a pending request to resume editing. Reviewers approve and publish or return it for changes; the submitter cannot review their own work. Published drafts disappear from the active list while retaining their history and attachments. Readers see only approved published content. Administrators manage users, categories and settings.",
+  "guideContent": "Editors can edit content and attachments across Knowledge and Drafts, including home and category pages. In Knowledge, choose Edit content to open the linked draft. Save draft and preview, check the rendered page, then Submit for review. The published page changes only after approval. The submitter can withdraw a pending request. Reviewers approve and publish or return it for changes; the submitter cannot review their own work. Published working copies stay hidden until editing resumes. Editors can update the writing-area home directly. Administrators manage category definitions, permissions, users and system configuration.",
   "uploadLimit": "Attachment upload limit (MB)",
   "uploadUnit": " MB (converted to bytes when saved)",
   "uploadInvalid": "Enter an integer from 1 to 99999 MB.",
@@ -103,7 +103,7 @@
   "withdrawHint": "You can withdraw your own pending request to continue editing.",
   "withdrawConfirm": "Withdraw this review request and restore draft editing?",
   "withdrawFailed": "The request could not be withdrawn. It may have changed or already been reviewed. Reload the page and try again.",
-  "editArticle": "Edit article",
+  "editArticle": "Edit content",
   "editArticleHint": "Changes are made in a linked draft. The published article stays unchanged until approval.",
   "editArticleUnavailable": "An editable draft is not available. Check the workflow configuration or contact an administrator.",
   "draftsEmpty": "No active drafts. Published working copies reappear here when you edit their articles."

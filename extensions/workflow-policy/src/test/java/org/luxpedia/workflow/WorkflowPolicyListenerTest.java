@@ -134,11 +134,15 @@ class WorkflowPolicyListenerTest {
     @Test void editorCanWriteAnUnsubmittedArticle() throws Exception {
         assertDoesNotThrow(() -> policy.check(doc, context, false));
     }
-    @Test void editorCannotSaveDraftIndexEvenWithCoreEditAccess() throws Exception {
+    @Test void editorCanEditTheWritingAreaHomeContent() throws Exception {
         when(doc.getDocumentReference()).thenReturn(ref("Drafts.WebHome"));
         when(policy.authorization.hasAccess(Right.EDIT, user, ref("Drafts.WebHome"))).thenReturn(true);
-        var error = assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
-        assertEquals("Only administrators may change space settings or indexes.", error.getMessage());
+        assertDoesNotThrow(() -> policy.check(doc, context, false));
+    }
+    @Test void editorCannotTurnTheWritingAreaHomeIntoAnArticleSubmission() throws Exception {
+        when(doc.getDocumentReference()).thenReturn(ref("Drafts.WebHome"));
+        states(null, "draft"); policy.operation = "startWorkflow";
+        assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
     }
     @Test void editorCanCreateANestedDraftWithCoreEditAccess() throws Exception {
         when(old.isNew()).thenReturn(true);
@@ -253,11 +257,34 @@ class WorkflowPolicyListenerTest {
         document("Knowledge.Technical.CategoryGuide");
         assertTrue(policy.validTarget(ref("Knowledge.Technical.CategoryGuide"), context));
     }
-    @Test void rootIndexesAndSpacePreferencesAreStillProtected() throws Exception {
-        for (String name : List.of("Knowledge.WebHome", "Knowledge.DocumentLibrary", "Knowledge.CategoryIndex",
-                "Knowledge.CategoryGuide", "Knowledge.CategoryAdmin", "Knowledge.Technical.WebPreferences")) {
+    @Test void spacePreferencesAndTheCategoryManagementActionRemainProtected() throws Exception {
+        for (String name : List.of("Knowledge.CategoryAdmin", "Knowledge.WebPreferences", "Knowledge.Technical.WebPreferences")) {
             document(name); assertFalse(policy.validTarget(ref(name), context), name);
         }
+    }
+    @Test void knowledgeHomeIndexesAndCategoryContentCanUseLinkedDrafts() throws Exception {
+        for (String name : List.of("Knowledge.WebHome", "Knowledge.DocumentLibrary", "Knowledge.CategoryIndex", "Knowledge.Catalog.WebHome")) {
+            policy.operation = "createDraftDocument"; states(null, "draft");
+            when(old.isNew()).thenReturn(true);
+            when(doc.getObject(WorkflowPolicyListener.WF).getStringValue("target")).thenReturn(name);
+            XWikiDocument article = document(name);
+            when(article.getObject("LuxPedia.Code.CategoryClass")).thenReturn(mock(BaseObject.class));
+            assertDoesNotThrow(() -> policy.check(doc, context, false), name);
+        }
+    }
+    @Test void categoryDefinitionObjectsCannotBeChangedByEditingTheirDraftBody() throws Exception {
+        states("draft", "draft"); changedClass("LuxPedia.Code.CategoryClass");
+        assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
+    }
+    @Test void newAdministratorImportedContentIsRegisteredForEditorChanges() throws Exception {
+        when(policy.authorization.hasAccess(eq(Right.ADMIN), eq(user), any())).thenReturn(true);
+        doc = document("Knowledge.Imported.Report"); old = document("Knowledge.Imported.Report");
+        when(doc.getOriginalDocument()).thenReturn(old); when(old.isNew()).thenReturn(true);
+        policy.localSerializer = mock(EntityReferenceSerializer.class);
+        when(policy.localSerializer.serialize(doc.getDocumentReference())).thenReturn("Knowledge.Imported.Report");
+        assertDoesNotThrow(() -> policy.check(doc, context, false));
+        verify(doc).newXObject(ref(WorkflowPolicyListener.WF), context);
+        verify(doc, never()).setContent(anyString());
     }
     @Test void editorCannotStartAsPublishedTarget() {
         policy.operation = "startWorkflowAsTarget"; states(null, "published");

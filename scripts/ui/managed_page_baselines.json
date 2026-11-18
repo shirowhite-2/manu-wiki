@@ -1,0 +1,62 @@
+{
+  "Knowledge/WebHome": {
+    "hashes": [
+      "11079fc1a638afba8607e2d00bb45c36bed8f7800bd938009623a449bfb99028",
+      "24f2852330496eb696e48cdff8ca70692958274d3b946403b0790968a1c1e30f",
+      "3c769d30fda7db6115fe47893bc9efaa40c65e002875508e84553eba9f084396",
+      "68c5303f905bdfc5b0064ecf7dbfeaf4c0210e3ceda198c5bad3b3f549a26cdb"
+    ],
+    "titles": [
+      "Knowledge",
+      "知识库"
+    ]
+  },
+  "Knowledge/CategoryIndex": {
+    "hashes": [
+      "457bb65cb4ce3aeaa3e4a5d2940750e02292879bc2e3ca79915c4df695e86c60",
+      "5899fa6c07261886a29bfb6647cebb3b4549168a5bda070a5873486eedd2fe0b",
+      "7c6752e534e9fdb5fedf9a10cb90e6775620e923cc5df948dc010c2c6d16a7bb",
+      "bb838c244c205b598ca54e7dc09638fff6de9eb3473e2207f9772566769c609d"
+    ],
+    "titles": [
+      "Categories",
+      "分类索引"
+    ]
+  },
+  "Knowledge/CategoryGuide": {
+    "hashes": [
+      "1bd545d165028e208ef1543a63194db034a78adbfa8b9754e34645239c2623d2",
+      "27dc4d72c7fea56bf812d9dc1bb54b66717d4d28917e2b66f578b3ba939ff8ec",
+      "8632f79fd7dc34d787aea8b7cc9383647b8e730503d71827416dad8aee0f8e37",
+      "f1f19218bc243f57b844a23a53c548c229203d7d60b0c56400f590669ea08f28"
+    ],
+    "titles": [
+      "Category guide",
+      "分类说明"
+    ]
+  },
+  "Knowledge/DocumentLibrary": {
+    "hashes": [
+      "92a26d16fd659e60bcaf52b20ee59125ca0136d5c87b1211373699a1752c40f3",
+      "c7ae6aa48781e4133a78a256e3d83953f26ce43cb402254267f2f13d3d1ed301",
+      "e385aec0ab08dfafe161d9815b062fa7614e817549c020ffc8a4d7d3e4341752",
+      "fc0e0abf4a3dc2c0e75b525cd1da3109055a894b7b10e93c3b75681e0be6e416"
+    ],
+    "titles": [
+      "Document library",
+      "文档库"
+    ]
+  },
+  "Drafts/WebHome": {
+    "hashes": [
+      "605c3d47696974acfaafa53ff25302e6a6932ca984e3918770f2e4b653cc0d92",
+      "8ecd790f6b3e17221ae398e1cac80a7a362a3996745a6826095afbbc6436539f",
+      "acfccf4e2a144901a277d2a6634f172c987eaa640df281fcd9dbcec72a54adc1",
+      "e01b6237d814f3557a4acf0363ec9ed2684dc3a0c1f1e7ba0ab55fba05d8b610"
+    ],
+    "titles": [
+      "Drafts",
+      "草稿区"
+    ]
+  }
+}

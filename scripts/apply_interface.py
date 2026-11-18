@@ -2,6 +2,8 @@
 """Install English-default LuxPedia interface pages and Chinese translations (no article rewrites)."""
 import argparse
 import importlib.util
+import hashlib
+import json
 import os
 import re
 import sys
@@ -37,22 +39,11 @@ PAGES = {
 * [[#lp('categories')>>Knowledge.CategoryIndex]]
 * [[#lp('editGuide')>>LuxPedia.Help.EditGuide]]
 ''' + CATEGORY_LIST + END),
-    ("Knowledge", "WebHome"): ("knowledge", V + "= #lp('knowledge') =\n\n#lp('knowledgeIntro')\n" + CATEGORY_LIST + END),
-    ("Knowledge", "CategoryIndex"): ("categories", V + "= #lp('categories') =\n\n#lp('categoryIntro')\n" + CATEGORY_LIST + END),
-    ("Knowledge", "CategoryGuide"): ("categoryGuide", V + "= #lp('categoryGuide') =\n\n#lp('categoryIntro')\n" + END),
-    ("Knowledge", "DocumentLibrary"): ("library", V + "= #lp('library') =\n\n#lp('libraryIntro')\n" + ARTICLE_LIST + END),
-    ("Drafts", "WebHome"): ("drafts", V + '''= #lp('drafts') =
-
-#lp('draftsIntro')
-
-#if($doc.hasAccessLevel('edit'))
-{{html clean="false"}}
-<p><a class="btn btn-primary" href="$escapetool.xml($xwiki.getURL('Drafts.WebHome', 'create', 'spaceReference=Drafts&parent=Drafts.WebHome&template=LuxPedia.Templates.Article'))">#lp('newArticle')</a></p>
-{{/html}}
-#end
-
-[[#lp('queue')>>PublicationWorkflow.Overview]] · [[#lp('editGuide')>>LuxPedia.Help.EditGuide]]
-''' + (UI / 'pages/drafts.xwiki').read_text() + END),
+    ("Knowledge", "WebHome"): ("knowledge", ""),
+    ("Knowledge", "CategoryIndex"): ("categories", ""),
+    ("Knowledge", "CategoryGuide"): ("categoryGuide", ""),
+    ("Knowledge", "DocumentLibrary"): ("library", ""),
+    ("Drafts", "WebHome"): ("drafts", ""),
     ("LuxPedia/Help", "EditGuide"): ("editGuide", V + "= #lp('editGuide') =\n\n#lp('guideContent')\n" + END),
     ("LuxPedia/Help", "WebHome"): ("help", V + "= #lp('help') =\n\n#lp('guideContent')\n" + END),
     ("LuxPedia/About", "WebHome"): ("about", V + "= #lp('about') =\n\n#lp('aboutContent')\n" + END),
@@ -60,13 +51,59 @@ PAGES = {
 }
 
 
-def ensure_translation(wiki, space, page, language, title, content):
+EDITABLE_PAGES = {
+    ('Knowledge', 'WebHome'): ('knowledge', 'knowledgeIntro', ['CategoryList']),
+    ('Knowledge', 'CategoryIndex'): ('categories', 'categoryIntro', ['CategoryList']),
+    ('Knowledge', 'CategoryGuide'): ('categoryGuide', 'categoryIntro', []),
+    ('Knowledge', 'DocumentLibrary'): ('library', 'libraryIntro', ['ArticleList']),
+    ('Drafts', 'WebHome'): ('drafts', 'draftsIntro', ['DraftTools', 'DraftList']),
+}
+MANAGED_BASELINES = json.loads((UI / 'managed_page_baselines.json').read_text())
+DRAFT_TOOLS = V + (UI / 'pages/draft_tools.xwiki').read_text() + END
+
+
+def editable_body(space, page, language):
+    key, intro, renderers = EDITABLE_PAGES[(space, page)]
+    content = '= ' + MESSAGES[language][key] + ' =\n\n' + MESSAGES[language][intro] + '\n\n'
+    return content + '\n\n'.join('{{include reference="LuxPedia.Code.' + name + '" author="target"/}}' for name in renderers)
+
+
+def ensure_editable_page(wiki, space, page):
+    key = EDITABLE_PAGES[(space, page)][0]
+    baseline = MANAGED_BASELINES[space + '/' + page]
+    content = editable_body(space, page, 'en')
+    status, body = wiki.request('GET', wiki.page_path(space, page))
+    if status == 200:
+        root = ET.fromstring(body)
+        existing = root.findtext('{http://www.xwiki.org}content') or ''
+        title = root.findtext('{http://www.xwiki.org}title') or ''
+        known = hashlib.sha256(existing.encode()).hexdigest() in baseline['hashes'] or existing == content
+        if not known or title not in baseline['titles']:
+            return
+    elif status != 404:
+        raise RuntimeError(f'Could not inspect editable page {space}.{page}: HTTP {status}')
+    wiki.ensure_page(space, page, MESSAGES['en'][key], content, update=True)
+    ensure_translation(wiki, space, page, 'zh', MESSAGES['zh'][key], editable_body(space, page, 'zh'),
+                       preserve_hashes=baseline['hashes'], preserve_titles=baseline['titles'])
+
+
+for _space, _page in EDITABLE_PAGES:
+    PAGES[(_space, _page)] = (EDITABLE_PAGES[(_space, _page)][0], editable_body(_space, _page, 'en'))
+
+
+def ensure_translation(wiki, space, page, language, title, content, preserve_hashes=None, preserve_titles=None):
     path = wiki.page_path(space, page) + '/translations/' + language
     status, body = wiki.request('GET', path)
     if status == 200:
         root = ET.fromstring(body)
         if root.findtext('{http://www.xwiki.org}title') == title and root.findtext('{http://www.xwiki.org}content') == content:
             return
+        if preserve_hashes is not None:
+            old = root.findtext('{http://www.xwiki.org}content') or ''
+            old_title = root.findtext('{http://www.xwiki.org}title') or ''
+            if ((hashlib.sha256(old.encode()).hexdigest() not in preserve_hashes and old != content)
+                    or old_title not in preserve_titles):
+                return
     xml = '<page xmlns="http://www.xwiki.org"><title>' + escape(title) + '</title><syntax>xwiki/2.1</syntax><content>' + escape(content) + '</content></page>'
     status, body = wiki.request('PUT', path, xml, 'application/xml', token=wiki.form_token())
     if status not in (200, 201, 202):
@@ -106,7 +143,13 @@ def apply(module, wiki):
         if changes:
             wiki.ensure_object_values('XWiki', 'XWikiPreferences', 'XWiki.XWikiPreferences', changes)
         break
+    for renderer, content in [('CategoryList', V + CATEGORY_LIST + END), ('ArticleList', V + ARTICLE_LIST + END),
+                              ('DraftList', V + (UI / 'pages/drafts.xwiki').read_text() + END), ('DraftTools', DRAFT_TOOLS)]:
+        wiki.ensure_page('LuxPedia/Code', renderer, renderer, content, hidden=True, update=True)
     for (space, page), (key, content) in PAGES.items():
+        if (space, page) in EDITABLE_PAGES:
+            ensure_editable_page(wiki, space, page)
+            continue
         content = content.replace('PublicationWorkflow.Overview', 'LuxPedia.Workflow.ReviewQueue')
         wiki.ensure_page(space, page, MESSAGES['en'][key], content, update=True)
         ensure_translation(wiki, space, page, 'zh', MESSAGES['zh'][key], content)
@@ -135,8 +178,10 @@ def apply(module, wiki):
     content = '{{velocity}}\n' + content + '\n{{/velocity}}'
     wiki.ensure_page('Knowledge', 'CategoryAdmin', 'Manage categories', content, update=True)
     ensure_translation(wiki, 'Knowledge', 'CategoryAdmin', 'zh', '分类管理', content)
-    category_template = V + ARTICLE_LIST.replace("(doc.space = 'Knowledge' or doc.space like 'Knowledge.%')", "doc.space = '$catSpace'")
-    category_template = category_template.replace('#set($articles', "#set($catSpace = $doc.fullName.replace('.WebHome', ''))\n#set($articles", 1) + END
+    category_template = V + ARTICLE_LIST.replace("(doc.space = 'Knowledge' or doc.space like 'Knowledge.%')", "doc.space = :categorySpace")
+    category_template = category_template.replace(').execute()', ").bindValue('categorySpace', $catSpace).execute()", 1)
+    category_context = "#set($categoryRef = $doc.fullName)\n#set($flow = $doc.getObject('PublicationWorkflow.PublicationWorkflowClass'))\n#if($categoryRef.startsWith('Drafts.') && $flow)#set($categoryRef = $flow.getValue('target'))#end\n#set($catSpace = $categoryRef.replace('.WebHome', ''))\n"
+    category_template = category_template.replace('#set($articles', category_context + '#set($articles', 1) + END
     wiki.ensure_page('LuxPedia/Code', 'CategoryHomeTemplate', 'Category article list', category_template, hidden=True, update=True)
     # Branding is optional: object creation requires an existing parent page.
     # Keep an existing panel document intact and localize only its panel object.

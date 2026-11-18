@@ -1,0 +1,10 @@
+# Optional, read-only source mount for Batch Import; retains the normal XWiki data volume.
+services:
+  xwiki:
+    volumes:
+      - type: bind
+        source: ${WIKI_IMPORT_SOURCE_DIR:?Set WIKI_IMPORT_SOURCE_DIR to the exported Office/media directory}
+        target: /imports/source
+        read_only: true
+        bind:
+          create_host_path: false

@@ -1,0 +1,7 @@
+#if($doc.hasAccessLevel('edit'))
+{{html clean="false"}}
+<p><a class="btn btn-primary" href="$escapetool.xml($xwiki.getURL('Drafts.WebHome', 'create', 'spaceReference=Drafts&parent=Drafts.WebHome&template=LuxPedia.Templates.Article'))">#lp('newArticle')</a></p>
+{{/html}}
+#end
+
+[[#lp('queue')>>LuxPedia.Workflow.ReviewQueue]] · [[#lp('editGuide')>>LuxPedia.Help.EditGuide]]

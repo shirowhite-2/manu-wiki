@@ -61,7 +61,7 @@ class FakeWiki:
     def request(self, method, path, data=None, content_type=None, **kwargs):
         self.requests.append((method, path, data))
         if 'PolicyStatus?' in path:
-            return 200, b'luxpedia-workflow-policy-3' if self.policy else b'POLICY_NOT_INSTALLED'
+            return 200, b'luxpedia-workflow-policy-4' if self.policy else b'POLICY_NOT_INSTALLED'
         if 'PolicySetup?' in path:
             return 200, b'AUDIT_CLASS_READY'
         if '/translations/' in path:
@@ -73,6 +73,14 @@ class FakeWiki:
                 root = ET.Element('page', xmlns='http://www.xwiki.org')
                 ET.SubElement(root, 'content').text = self.article_template
                 return 200, ET.tostring(root)
+            return 404, b''
+        if method == 'GET' and '/pages/' in path:
+            for (space, page), (title, content) in self.pages.items():
+                if path == self.page_path(space, page):
+                    root = ET.Element('page', xmlns='http://www.xwiki.org')
+                    ET.SubElement(root, 'title').text = title
+                    ET.SubElement(root, 'content').text = content
+                    return 200, ET.tostring(root)
             return 404, b''
         raise AssertionError((method, path))
 
@@ -117,6 +125,45 @@ class DraftHomeRightsWiki:
 
 
 class InterfaceConfigTest(unittest.TestCase):
+    def test_editable_home_content_has_no_inline_script_and_preserves_approved_changes(self):
+        wiki = FakeWiki()
+        custom = {('Knowledge', 'WebHome'): ('Team encyclopedia', '= Approved introduction =\nTeam content'),
+                  ('Drafts', 'WebHome'): ('Writing desk', '= Our writing guide =\nCustom editor instructions')}
+        wiki.pages.update(custom)
+        interface.apply(Module, wiki)
+        for key, value in custom.items():
+            self.assertEqual(wiki.pages[key], value)
+        for space, page in interface.EDITABLE_PAGES:
+            self.assertNotIn('{{velocity', interface.editable_body(space, page, 'en'))
+            self.assertNotIn('{{velocity', interface.editable_body(space, page, 'zh'))
+
+    def test_known_generated_home_migrates_to_a_trusted_renderer_include(self):
+        wiki = FakeWiki()
+        previous = interface.V + "= #lp('knowledge') =\n\n#lp('knowledgeIntro')\n" + interface.CATEGORY_LIST + interface.END
+        wiki.pages[('Knowledge', 'WebHome')] = ('Knowledge', previous)
+        interface.apply(Module, wiki)
+        body = wiki.pages[('Knowledge', 'WebHome')][1]
+        self.assertNotIn('{{velocity', body)
+        self.assertIn('reference="LuxPedia.Code.CategoryList" author="target"', body)
+        self.assertIn('{{velocity', wiki.pages[('LuxPedia/Code', 'CategoryList')][1])
+
+    def test_custom_chinese_translation_of_editable_home_is_preserved(self):
+        class TranslatedWiki(FakeWiki):
+            def request(self, method, path, *args, **kwargs):
+                if method == 'GET' and path.endswith('/Knowledge/pages/WebHome/translations/zh'):
+                    return 200, '<page xmlns="http://www.xwiki.org"><title>团队百科</title><content>审核通过的中文介绍</content></page>'.encode()
+                return super().request(method, path, *args, **kwargs)
+        wiki = TranslatedWiki()
+        interface.apply(Module, wiki)
+        self.assertFalse(any(method == 'PUT' and path.endswith('/Knowledge/pages/WebHome/translations/zh')
+                             for method, path, data in wiki.requests))
+
+    def test_category_preview_uses_its_knowledge_target_not_the_draft_path(self):
+        wiki = FakeWiki(); interface.apply(Module, wiki)
+        content = wiki.pages[('LuxPedia/Code', 'CategoryHomeTemplate')][1]
+        self.assertIn("$flow.getValue('target')", content)
+        self.assertIn(".bindValue('categorySpace', $catSpace)", content)
+
     def test_native_workflow_and_field_catalogs_have_both_languages(self):
         import re
         for stem in ('workflow', 'fields'):
@@ -182,7 +229,7 @@ class InterfaceConfigTest(unittest.TestCase):
         self.assertEqual(len(wiki.rules), 1)
 
     def test_new_article_entry_uses_native_form_and_article_template(self):
-        content = interface.PAGES[('Drafts', 'WebHome')][1]
+        content = interface.DRAFT_TOOLS
         self.assertIn("#if($doc.hasAccessLevel('edit'))", content)
         self.assertIn("$xwiki.getURL('Drafts.WebHome', 'create',", content)
         self.assertIn('spaceReference=Drafts&parent=Drafts.WebHome&template=LuxPedia.Templates.Article', content)
@@ -203,6 +250,8 @@ class InterfaceConfigTest(unittest.TestCase):
         interface.apply(Module, wiki)
         allowed = set(interface.PAGES) | {('PublicationWorkflow', 'Translations'), ('Knowledge', 'CategoryAdmin'),
             ('LuxPedia/Code', 'CategoryHomeTemplate'), ('LuxPedia/Code', 'InterfaceTranslations'),
+            ('LuxPedia/Code', 'CategoryList'), ('LuxPedia/Code', 'ArticleList'),
+            ('LuxPedia/Code', 'DraftList'), ('LuxPedia/Code', 'DraftTools'),
             ('LuxPedia', 'HelpPanel'), ('LuxPedia/Code', 'SourceEditUIX'), ('LuxPedia/Code', 'EditGuideUIX')}
         self.assertLessEqual(wiki.pages.keys(), allowed)
         puts = [path for method, path, data in wiki.requests if method == 'PUT']
@@ -265,9 +314,10 @@ class InterfaceConfigTest(unittest.TestCase):
                         if method == 'PUT' and path.endswith('/Drafts/pages/WebHome/translations/zh')]
         self.assertEqual(len(translations), 1)
         for content in [english, *translations]:
-            self.assertIn("$state != 'published' && $state != 'archived'", content)
-            self.assertIn('luxpedia-system-list', content)
+            self.assertIn('reference="LuxPedia.Code.DraftList" author="target"', content)
             self.assertNotIn('{{documents ', content)
+            self.assertNotIn('{{velocity', content)
+        self.assertIn("$state != 'published' && $state != 'archived'", wiki.pages[('LuxPedia/Code', 'DraftList')][1])
 
     def test_old_policy_stops_before_new_workflow_features_are_deployed(self):
         wiki = FakeWiki()
@@ -318,11 +368,11 @@ class InterfaceConfigTest(unittest.TestCase):
     def test_script_denial_is_not_reported_as_a_missing_jar(self):
         body = b'Failed to execute the [groovy] macro. The execution of the [groovy] script macro is not allowed.'
         with self.assertRaisesRegex(RuntimeError, 'page author cannot execute'):
-            security.verify_response(200, body, 'luxpedia-workflow-policy-3', 'PolicyStatus')
+            security.verify_response(200, body, 'luxpedia-workflow-policy-4', 'PolicyStatus')
 
     def test_policy_marker_accepts_plain_or_rendered_output(self):
-        for body in (b'luxpedia-workflow-policy-3\n', b'<p>luxpedia-workflow-policy-3</p>'):
-            security.verify_response(200, body, 'luxpedia-workflow-policy-3', 'PolicyStatus')
+        for body in (b'luxpedia-workflow-policy-4\n', b'<p>luxpedia-workflow-policy-4</p>'):
+            security.verify_response(200, body, 'luxpedia-workflow-policy-4', 'PolicyStatus')
 
     def test_admin_and_token_errors_are_distinct(self):
         with self.assertRaisesRegex(RuntimeError, 'wiki-level administrator'):

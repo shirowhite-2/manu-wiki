@@ -419,7 +419,7 @@ WORKFLOW_UX_JS = r"""(function () {
   }
 
   function installDoneButton(reference, isAdmin) {
-    if (isAdmin || !location.pathname.match(/^\/bin\/edit\/Drafts(?:\/|$)/)) { return true; }
+    if (isAdmin || reference === 'Drafts.WebHome' || !location.pathname.match(/^\/bin\/edit\/Drafts(?:\/|$)/)) { return true; }
     var done = document.querySelector('button.realtime-action-done, input[name="action_save"], button[name="action_save"]');
     if (!done) { return false; }
     if (done.getAttribute('data-luxpedia-preview-bound') === '1') { return true; }
@@ -455,7 +455,7 @@ WORKFLOW_UX_JS = r"""(function () {
   }
 
   function installCategorySelector(reference, isAdmin, attempts) {
-    if (isAdmin || attempts >= 30 || !location.pathname.match(/^\/bin\/edit\/Drafts(?:\/|$)/) ||
+    if (isAdmin || reference === 'Drafts.WebHome' || attempts >= 30 || !location.pathname.match(/^\/bin\/edit\/Drafts(?:\/|$)/) ||
         document.getElementById('luxpedia-category-choice')) { return; }
     workflowObjectExists(reference).then(function (hasWorkflow) {
       var container = document.createElement('div');
@@ -611,7 +611,7 @@ def load_apply_module():
 PANEL_VALUES = {"rightPanels": "PublicationWorkflow.PublicationWorkflowPanel"}
 REVIEW_QUEUE_LINK = "* [[待审核队列>>PublicationWorkflow.Overview]]\n"
 LUXPEDIA_VIEW_ROLES = ("XWiki.LuxEditors", "XWiki.LuxReviewers", "XWiki.LuxReaders")
-# The Drafts home page is system-maintained; only admins may edit the index.
+# The writing-area home is editable content; its list/toolbar code lives in protected renderer pages.
 def read_page(wiki, space, page):
     status, body = wiki.request("GET", wiki.page_path(space, page))
     if status != 200:
@@ -816,32 +816,7 @@ def apply(module, wiki):
     module.log("== restore draft creation; server policy protects home saves")
     restore_draft_creation(module, wiki)
 
-    module.log("== expose pending-review queue")
-    title, content, _, author = read_page(wiki, "Drafts", "WebHome")
-    if title is not None and "PublicationWorkflow.Overview" not in content:
-        if "{{velocity}}" in content:
-            content = content.replace("{{velocity}}", REVIEW_QUEUE_LINK + "\n{{velocity}}", 1)
-        else:
-            content = REVIEW_QUEUE_LINK + "\n" + content
-        wiki.ensure_page("Drafts", "WebHome", title, content, hidden=False, update=True)
-
-    # Replace the legacy script macro. Its content author can remain an editor,
-    # but the built-in Documents macro does not require script rights.
-    title, content, hidden, author = read_page(wiki, "Drafts", "WebHome")
-    if title is not None:
-        content, replacements = re.subn(
-            r"\{\{velocity\}\}.*?\{\{/velocity\}\}",
-            '== 草稿文章 ==\n\n{{documents space="Drafts" count="100" actions="false" columns="doc.title, doc.location"/}}',
-            content,
-            count=1,
-            flags=re.DOTALL,
-        )
-        if replacements or hidden or author != "XWiki.Admin":
-            wiki.ensure_page("Drafts", "WebHome", title, content, hidden=False, update=True)
-    for space, page in (("Drafts", "SampleArticle"), ("Drafts/test", "WebHome")):
-        title, content, hidden, _ = read_page(wiki, space, page)
-        if title is not None and hidden:
-            wiki.ensure_page(space, page, title, content, hidden=False, update=True)
+    # Editable writing-area content is migrated conservatively by apply_interface.
 
     module.log("== workflow panel on published Knowledge articles")
     wiki.ensure_object_values("Knowledge", "WebPreferences", "XWiki.XWikiPreferences", PANEL_VALUES)

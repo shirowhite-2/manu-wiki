@@ -78,6 +78,11 @@ public class WorkflowPolicyListener implements EventListener
         require(user != null, "Sign in to change content.");
         if (authorization.hasAccess(Right.ADMIN, user,
             new DocumentReference(ref.getWikiReference().getName(), "XWiki", "XWikiPreferences"))) {
+            if (!deleting && doc.getTranslation() == 0 && space.equals("Knowledge") && old.isNew() && next == null &&
+                workflowOperation().isEmpty() && validTarget(ref, context) &&
+                !context.getWiki().getDocument(new DocumentReference(context.getWikiId(), List.of("LuxPedia", "Workflow"), "Config"), context).isNew()) {
+                registerPublishedTarget(doc, context);
+            }
             if (!deleting && space.equals("Drafts") && next != null &&
                 Set.of("publish", "editDraft", "createDraftDocument").contains(workflowOperation())) {
                 doc.setHidden(status(next).equals("published"));
@@ -93,9 +98,7 @@ public class WorkflowPolicyListener implements EventListener
         }
         require(!deleting, "Only administrators may delete articles.");
         require(authorization.hasAccess(Right.VIEW, user, ref), "You cannot change content you are not allowed to read.");
-        require(!ref.getName().equals("WebPreferences") &&
-            !(space.equals("Drafts") && ref.getSpaceReferences().size() == 1 && ref.getName().equals("WebHome")),
-            "Only administrators may change space settings or indexes.");
+        require(!ref.getName().equals("WebPreferences"), "Only administrators may change space settings.");
         Set<String> groups = groups(user, context);
         String wiki = ref.getWikiReference().getName();
         boolean editor = groups.contains(wiki + ":XWiki.LuxEditors");
@@ -126,12 +129,15 @@ public class WorkflowPolicyListener implements EventListener
         String after = status(next);
         switch (operation) {
             case "startWorkflow":
+                require(!(ref.getName().equals("WebHome") && ref.getSpaceReferences().size() == 1),
+                    "The writing-area home is edited in place, not submitted as an article.");
                 require(editor && previous == null && after.equals("draft"), "Only editors may start a draft workflow.");
                 validWorkflow(next, ref, context);
                 break;
             case "createDraftDocument":
                 require(editor && old.isNew() && after.equals("draft"), "Only editors may create a linked draft.");
                 validWorkflow(next, ref, context);
+                normalizeEditorContent(doc, user);
                 break;
             case "editDraft":
                 require(editor && before.equals("published") && after.equals("draft"), "Only editors may reopen published drafts.");
@@ -169,12 +175,7 @@ public class WorkflowPolicyListener implements EventListener
                 if (commentsOnly(old, doc, context)) { return; }
                 require(editor && (previous == null || before.equals("draft")),
                     "Only editors may edit draft content; submitted content is locked.");
-                if (doc.getContent() != null && doc.getContent().startsWith(LEGACY_METADATA)) {
-                    // Remove only the exact system-generated prefix, under the author's
-                    // own identity. Never re-author arbitrary user content as an admin.
-                    doc.setContent(doc.getContent().substring(LEGACY_METADATA.length()));
-                    doc.setContentAuthorReference(user);
-                }
+                normalizeEditorContent(doc, user);
                 return;
             default:
                 require(false, "This workflow operation is reserved for administrators.");
@@ -191,6 +192,18 @@ public class WorkflowPolicyListener implements EventListener
         require(!user.toString().equals(audit.getStringValue("submittedBy")) &&
             !user.toString().equals(audit.getStringValue("authoredBy")) && !user.equals(draft.getCreatorReference()),
             "You cannot approve, publish or reject your own article submission.");
+    }
+
+    private void normalizeEditorContent(XWikiDocument doc, DocumentReference user) {
+        String content = doc.getContent();
+        if (content == null) { return; }
+        String cleaned = content.startsWith(LEGACY_METADATA) ? content.substring(LEGACY_METADATA.length()) : content;
+        cleaned = cleaned.replace("{{include document=\"LuxPedia.Code.CategoryHomeTemplate\"/}}",
+            "{{include reference=\"LuxPedia.Code.CategoryHomeTemplate\" author=\"target\"/}}");
+        if (!cleaned.equals(content)) {
+            doc.setContent(cleaned);
+            doc.setContentAuthorReference(user);
+        }
     }
 
     boolean canWithdraw(XWikiDocument draft, XWikiContext context) throws Exception {
@@ -219,17 +232,22 @@ public class WorkflowPolicyListener implements EventListener
         DocumentReference target = resolver.resolve(object.getStringValue("target"), source);
         require(target.getWikiReference().equals(source.getWikiReference()) && validTarget(target, context),
             "Publication is limited to articles in this wiki's Knowledge categories.");
+        if (workflowOperation().equals("startWorkflow")) {
+            XWikiDocument existing = context.getWiki().getDocument(target, context);
+            boolean landing = existing.getObject("LuxPedia.Code.CategoryClass") != null ||
+                (target.getSpaceReferences().size() == 1 &&
+                    (target.getName().equals("WebHome") || SYSTEM_NAMES.contains(target.getName())));
+            require(!landing, "Open the existing content page's linked draft instead of replacing it with a new article.");
+        }
         require(authorization.hasAccess(Right.VIEW, context.getUserReference(), target),
             "You cannot publish into a category you cannot read.");
     }
 
     boolean validTarget(DocumentReference ref, XWikiContext context) throws Exception {
-        XWikiDocument target = context.getWiki().getDocument(ref, context);
         boolean root = ref.getSpaceReferences().size() == 1;
         return ref.getSpaceReferences().get(0).getName().equals("Knowledge") &&
             !ref.getName().equals("WebPreferences") &&
-            !(root && (ref.getName().equals("WebHome") || SYSTEM_NAMES.contains(ref.getName()))) &&
-            target.getObject("LuxPedia.Code.CategoryClass") == null;
+            !(root && ref.getName().equals("CategoryAdmin"));
     }
 
     boolean protectedObjectChanged(XWikiDocument old, XWikiDocument doc, XWikiContext context) throws Exception {
@@ -319,7 +337,7 @@ public class WorkflowPolicyListener implements EventListener
         require(drafts.size() == 1, "A unique matching draft workflow is required.");
         return resolver.resolve(drafts.get(0), target);
     }
-    public String getPolicyVersion() { return "luxpedia-workflow-policy-3"; }
+    public String getPolicyVersion() { return "luxpedia-workflow-policy-4"; }
     /** Deployment migration: remove historical validator EDIT grants without re-authoring content. */
     public int repairExistingDraftRights(XWikiContext context) throws Exception {
         require(authorization.hasAccess(Right.ADMIN, context.getUserReference(),
@@ -359,17 +377,21 @@ public class WorkflowPolicyListener implements EventListener
             XWikiDocument original = context.getWiki().getDocument(reference, context);
             if (original.isNew() || original.getObject(WF) != null || !validTarget(reference, context)) { continue; }
             XWikiDocument article = original.clone();
-            BaseObject flow = article.newXObject(resolver.resolve(WF, reference), context);
-            flow.set("status", "published", context);
-            flow.set("workflow", "LuxPedia.Workflow.Config", context);
-            flow.set("target", localSerializer.serialize(reference), context);
-            flow.set("istarget", 1, context);
-            flow.set("includeChildren", 0, context);
+            registerPublishedTarget(article, context);
             article.setContentAuthorReference(original.getContentAuthorReference());
             context.getWiki().saveDocument(article, "Register existing article for reviewed changes", true, context);
             registered++;
         }
         return registered;
+    }
+    private void registerPublishedTarget(XWikiDocument article, XWikiContext context) throws Exception {
+        DocumentReference reference = article.getDocumentReference();
+        BaseObject flow = article.newXObject(resolver.resolve(WF, reference), context);
+        flow.set("status", "published", context);
+        flow.set("workflow", "LuxPedia.Workflow.Config", context);
+        flow.set("target", localSerializer.serialize(reference), context);
+        flow.set("istarget", 1, context);
+        flow.set("includeChildren", 0, context);
     }
     private static String legacyMetadata() {
         try (var stream = WorkflowPolicyListener.class.getResourceAsStream("/legacy-article-metadata.xwiki")) {

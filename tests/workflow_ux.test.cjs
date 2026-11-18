@@ -495,3 +495,30 @@ test('an unregistered Knowledge page does not expose a native direct-edit link',
     assert.equal(wiki.state.actions.length, 0);
   } finally { await wiki.context.close(); }
 });
+
+for (const reference of ['Knowledge.WebHome', 'Knowledge.Catalog.WebHome']) {
+  test('editor can propose content changes to ' + reference, async () => {
+    const wiki = await wikiFixture({ reference, status: 'published', linkedTarget: reference, nativeEdit: true });
+    try {
+      await wiki.page.goto(wiki.origin + '/bin/view/' + reference.split('.').join('/'));
+      await wiki.page.locator('#luxpedia-edit-article').click();
+      await wiki.page.waitForURL(/\/bin\/edit\/Drafts\/Linked\/Article/);
+      assert.equal(wiki.state.target, reference);
+      assert.deepEqual(wiki.state.actions.map(action => action.action), ['getEditableDraft']);
+    } finally { await wiki.context.close(); }
+  });
+}
+
+test('writing-area home is editable without being treated as a publication draft', async () => {
+  const wiki = await wikiFixture({ reference: 'Drafts.WebHome', nativeEdit: true, hasArticle: false });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/view/Drafts/WebHome');
+    await wiki.page.waitForFunction(() => document.querySelector('.panel')?.hidden);
+    assert.equal(await wiki.page.locator('#tmEdit').isVisible(), true);
+    await wiki.page.locator('#tmEdit').click();
+    await wiki.page.waitForURL(/\/bin\/edit\/Drafts\/WebHome/);
+    assert.equal(await wiki.page.locator('#luxpedia-publish-category').count(), 0);
+    assert.equal(await wiki.page.locator('.realtime-action-done').getAttribute('data-luxpedia-preview-bound'), null);
+    assert.equal(wiki.state.actions.length, 0);
+  } finally { await wiki.context.close(); }
+});

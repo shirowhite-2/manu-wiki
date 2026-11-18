@@ -34,11 +34,12 @@ python3 tests/sprint1_smoke.py
 
 ## 交付与记录
 
+- [当前角色、百科/编写区流程与部署](docs/roles-and-interface.md)
+- [Word、视频与大批量资料迁入](docs/bulk-import.md)（含只读目录盘点、CSV 分批和存储规划）
 - [Sprint 1 角色、分类与文章结构](docs/sprint1.md)
 - [部署、启动、备份和恢复](docs/deployment.md)
 - [账号、权限、编辑、附件和模板](docs/usage.md)
 - [Publication Workflow 配置与实际记录](docs/workflow.md)
-- [角色越权检查、英文/中文界面与服务端组件部署](docs/roles-and-interface.md)
 - [AI 版本、模型接口、索引与权限方案](docs/ai.md)
 - [Office 引擎和连接器源码构建调研](docs/office.md)
 - [组件、版本、许可证与费用](docs/components.md)

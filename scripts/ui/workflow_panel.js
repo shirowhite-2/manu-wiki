@@ -15,6 +15,10 @@
     };
     document.querySelectorAll('.publicationworkflow-info, .publicationworkflow-information').forEach(function (panel) {
       var host = panel.closest('.xwikipanel, .panel');
+      if (documentReference() === 'Drafts.WebHome') {
+        if (host) { host.hidden = true; }
+        return;
+      }
       var heading = host && host.querySelector('.panel-title, .panel-heading, h2');
       if (heading) { text(heading, t('workflow')); }
       panel.querySelectorAll('form').forEach(function (form) {
