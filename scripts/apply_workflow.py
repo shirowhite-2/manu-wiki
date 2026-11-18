@@ -66,6 +66,7 @@ WORKFLOW_UX_JS = r"""(function () {
 
   /* LUXPEDIA_WORKFLOW_PANEL */
   /* LUXPEDIA_DRAFT_ACTIONS */
+  /* LUXPEDIA_DRAFT_WORKSPACE */
 
   function documentReference() {
     var meta = document.querySelector('meta[name="document"]');
@@ -574,7 +575,8 @@ WORKFLOW_UX_JS = r"""(function () {
 
 WORKFLOW_UX_JS = I18N_JS + WORKFLOW_UX_JS.replace(
     '/* LUXPEDIA_WORKFLOW_PANEL */', (UI / 'workflow_panel.js').read_text()).replace(
-    '/* LUXPEDIA_DRAFT_ACTIONS */', (UI / 'draft_actions.js').read_text())
+    '/* LUXPEDIA_DRAFT_ACTIONS */', (UI / 'draft_actions.js').read_text()).replace(
+    '/* LUXPEDIA_DRAFT_WORKSPACE */', (UI / 'draft_workspace.js').read_text())
 
 WORKFLOW_UX_PROPERTIES = {
     "name": "luxpedia.workflowUX",

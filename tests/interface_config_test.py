@@ -66,7 +66,7 @@ class FakeWiki:
     def request(self, method, path, data=None, content_type=None, **kwargs):
         self.requests.append((method, path, data))
         if 'PolicyStatus?' in path:
-            return 200, b'luxpedia-workflow-policy-6' if self.policy else b'POLICY_NOT_INSTALLED'
+            return 200, b'luxpedia-workflow-policy-7' if self.policy else b'POLICY_NOT_INSTALLED'
         if 'PolicySetup?' in path:
             return 200, b'AUDIT_CLASS_READY'
         if '/translations/' in path:
@@ -305,6 +305,26 @@ class InterfaceConfigTest(unittest.TestCase):
         self.assertEqual(MESSAGES['en']['workflowCenter'], 'Workflow')
         self.assertEqual(MESSAGES['zh']['workflowCenter'], '工作流')
 
+    def test_workspace_schema_endpoint_and_list_filters_are_installed_without_delete_permissions(self):
+        wiki = FakeWiki()
+        security.apply(Module, wiki)
+        self.assertIn(('LuxPedia/Code', 'DraftWorkspaceClass'), wiki.pages)
+        endpoint = wiki.pages[('LuxPedia/Workflow', 'DraftWorkspace')][1]
+        self.assertIn("getMethod() == 'POST'", endpoint)
+        self.assertIn('manageDraft(', endpoint)
+        self.assertIn('draftWorkspace(', endpoint)
+        self.assertIn("getParameter('form_token')", endpoint)
+        for key in ('abandonDraft', 'restoreDraft', 'abandonSelected', 'abandonedDrafts'):
+            self.assertTrue(MESSAGES['en'][key])
+            self.assertTrue(MESSAGES['zh'][key])
+        body = (ROOT / 'scripts/ui/pages/drafts.xwiki').read_text()
+        self.assertIn("draftView", body)
+        self.assertIn("LuxPedia.Code.DraftWorkspaceClass", body)
+        self.assertIn("!$abandoned", body)
+        self.assertIn('data-version=', body)
+        self.assertFalse(any(rule.get('allow') == '1' and 'delete' in rule.get('levels', '')
+                             for space, page, rule in wiki.rights if rule.get('groups') == 'XWiki.LuxEditors'))
+
     def test_language_catalogs_match_and_default_is_english(self):
         self.assertEqual(MESSAGES['en'].keys(), MESSAGES['zh'].keys())
         wiki = FakeWiki()
@@ -439,11 +459,11 @@ class InterfaceConfigTest(unittest.TestCase):
     def test_script_denial_is_not_reported_as_a_missing_jar(self):
         body = b'Failed to execute the [groovy] macro. The execution of the [groovy] script macro is not allowed.'
         with self.assertRaisesRegex(RuntimeError, 'page author cannot execute'):
-            security.verify_response(200, body, 'luxpedia-workflow-policy-6', 'PolicyStatus')
+            security.verify_response(200, body, 'luxpedia-workflow-policy-7', 'PolicyStatus')
 
     def test_policy_marker_accepts_plain_or_rendered_output(self):
-        for body in (b'luxpedia-workflow-policy-6\n', b'<p>luxpedia-workflow-policy-6</p>'):
-            security.verify_response(200, body, 'luxpedia-workflow-policy-6', 'PolicyStatus')
+        for body in (b'luxpedia-workflow-policy-7\n', b'<p>luxpedia-workflow-policy-7</p>'):
+            security.verify_response(200, body, 'luxpedia-workflow-policy-7', 'PolicyStatus')
 
     def test_admin_and_token_errors_are_distinct(self):
         with self.assertRaisesRegex(RuntimeError, 'wiki-level administrator'):

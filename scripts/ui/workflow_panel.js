@@ -6,6 +6,8 @@
     if (node && node.textContent !== value) { node.textContent = value; }
   }
   function translateWorkflowUI() {
+    bindDraftWorkspaceList();
+    var workspaceAbandoned = workspaceSnapshot && workspaceSnapshot.abandoned && documentReference().startsWith('Drafts.');
     renderArticleMetadata();
     var actions = {
       start: 'start', submitformoderation: 'submit', submitforvalidation: 'submit',
@@ -67,7 +69,8 @@
         });
       }
       var state = panelSnapshot ? panelSnapshot.status : 'unstarted';
-      text(summary.querySelector('.luxpedia-state'), t(state));
+      text(summary.querySelector('.luxpedia-state'), t(workspaceAbandoned ? 'abandonedTitle' : state));
+      summary.querySelector('.luxpedia-steps').hidden = Boolean(workspaceAbandoned);
       var steps = summary.querySelectorAll('li');
       ['stepDraft', 'stepReview', 'stepPublish'].forEach(function (key, index) {
         text(steps[index], t(key));
@@ -79,7 +82,7 @@
       });
       var next = state === 'published' ? 'nextPublished' : state === 'archived' ? 'nextArchived' :
         state === 'valid' ? 'nextValid' : ['validating', 'moderating'].includes(state) ? 'nextReview' : 'nextDraft';
-      text(summary.querySelector('.luxpedia-next'), t(next));
+      text(summary.querySelector('.luxpedia-next'), t(workspaceAbandoned ? 'abandonedHint' : next));
       text(summary.querySelector('dt'), t('destination'));
       var target = panelSnapshot && panelSnapshot.target;
       var parts = target ? target.replace(/^xwiki:/, '').split('.') : [];
@@ -91,7 +94,7 @@
       panel.querySelectorAll(':scope > p').forEach(function (node) { node.hidden = true; });
     });
     if (uiRoles && !uiRoles.admin) {
-      var locked = panelSnapshot && !['unstarted', 'draft'].includes(panelSnapshot.status);
+      var locked = workspaceAbandoned || panelSnapshot && !['unstarted', 'draft'].includes(panelSnapshot.status);
       document.querySelectorAll('#tmEdit, #tmSourceEdit').forEach(function (node) {
         node.hidden = !uiRoles.editor || Boolean(locked) || documentReference().indexOf('Knowledge.') === 0;
       });

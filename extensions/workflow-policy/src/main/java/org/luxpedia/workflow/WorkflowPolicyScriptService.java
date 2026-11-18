@@ -23,6 +23,7 @@ import java.util.List;
 @Singleton
 public class WorkflowPolicyScriptService implements ScriptService
 {
+    static final ThreadLocal<String> WORKSPACE_OPERATION = ThreadLocal.withInitial(() -> "");
     @Inject Execution execution;
     @Inject AuthorizationManager authorization;
     @Inject CSRFToken csrf;
@@ -75,10 +76,70 @@ public class WorkflowPolicyScriptService implements ScriptService
         if (schema.get("authoredBy") == null) { changed |= schema.addTextField("authoredBy", "Content authored by", 60); }
         if (schema.get("submittedVersion") == null) { changed |= schema.addTextField("submittedVersion", "Submitted version", 30); }
         if (changed) { context.getWiki().saveDocument(audit, "Ensure review audit fields", true, context); }
+        XWikiDocument workspaceSchema = context.getWiki().getDocument(
+            new DocumentReference(context.getWikiId(), List.of("LuxPedia", "Code"), "DraftWorkspaceClass"), context).clone();
+        BaseClass workspaceClass = workspaceSchema.getXClass();
+        boolean workspaceChanged = false;
+        for (String field : List.of("owner", "shared", "status", "changedBy", "changedAt")) {
+            if (workspaceClass.get(field) == null) { workspaceChanged |= workspaceClass.addTextField(field, field, 100); }
+        }
+        if (workspaceChanged) { context.getWiki().saveDocument(workspaceSchema, "Ensure draft workspace fields", true, context); }
         ((WorkflowPolicyListener) listener).repairExistingDraftRights(context);
         ((WorkflowPolicyListener) listener).registerExistingKnowledgeTargets(context);
         ((WorkflowPolicyListener) listener).repairIdentityPrivacy(context);
         return "AUDIT_CLASS_READY";
+    }
+
+    XWikiDocument workspaceDraft(String name) throws Exception {
+        XWikiContext context = context();
+        if (name == null || name.isBlank() || name.length() > 1024 || context.getUserReference() == null) { return null; }
+        var policy = (WorkflowPolicyListener) listener;
+        DocumentReference ref = policy.resolver.resolve(name, new WikiReference(context.getWikiId()));
+        if (!ref.getWikiReference().getName().equals(context.getWikiId()) ||
+            !ref.getSpaceReferences().get(0).getName().equals("Drafts")) { return null; }
+        XWikiDocument doc = context.getWiki().getDocument(ref, context);
+        if (!DraftWorkspace.inScope(doc, context) || !policy.authorization.hasAccess(Right.VIEW,
+            context.getUserReference(), ref)) { return null; }
+        return doc;
+    }
+
+    public String draftWorkspace(String name) throws Exception {
+        XWikiDocument doc = workspaceDraft(name);
+        if (doc == null) { return "{\"abandoned\":false,\"abandon\":false,\"restore\":false,\"version\":\"\"}"; }
+        var policy = (WorkflowPolicyListener) listener;
+        String version = doc.getVersion();
+        if (!version.matches("[0-9]+\\.[0-9]+")) { version = ""; }
+        return "{\"abandoned\":" + DraftWorkspace.abandoned(doc) + ",\"abandon\":" +
+            DraftWorkspace.allowed(policy, doc, context(), false) + ",\"restore\":" +
+            DraftWorkspace.allowed(policy, doc, context(), true) + ",\"version\":\"" + version + "\"}";
+    }
+
+    public String manageDraft(String name, String version, String operation, String token) throws Exception {
+        XWikiContext context = context();
+        if (context.getRequest() == null || !"POST".equals(context.getRequest().getMethod())) { return "POLICY_POST_REQUIRED"; }
+        if (!csrf.isTokenValid(token)) { return "POLICY_BAD_TOKEN"; }
+        if (!List.of("abandon", "restore").contains(operation == null ? "" : operation)) { return "WORKSPACE_FORBIDDEN"; }
+        XWikiDocument original = workspaceDraft(name);
+        var policy = (WorkflowPolicyListener) listener;
+        boolean restore = operation.equals("restore");
+        if (original == null || !DraftWorkspace.allowed(policy, original, context, restore)) { return "WORKSPACE_FORBIDDEN"; }
+        if (!original.getVersion().equals(version)) { return "WORKSPACE_CONFLICT"; }
+        XWikiDocument draft = original.clone();
+        var workspace = draft.getObject(DraftWorkspace.CLASS);
+        if (workspace == null) {
+            DraftWorkspace.track(policy, draft, original, context.getUserReference(), context, false);
+            workspace = draft.getObject(DraftWorkspace.CLASS);
+        }
+        workspace.set("status", restore ? "active" : "abandoned", context);
+        workspace.set("changedBy", context.getUserReference().toString(), context);
+        workspace.set("changedAt", java.time.Instant.now().toString(), context);
+        policy.normalizeDraftRights(draft, WorkflowPolicyListener.status(draft.getObject(WorkflowPolicyListener.WF)), context);
+        draft.setHidden(!restore);
+        draft.setContentAuthorReference(original.getContentAuthorReference());
+        WORKSPACE_OPERATION.set(restore ? "restoreDraft" : "abandonDraft");
+        try { context.getWiki().saveDocument(draft, restore ? "Restore abandoned draft" : "Abandon draft without deleting content", true, context); }
+        finally { WORKSPACE_OPERATION.remove(); }
+        return restore ? "DRAFT_RESTORED" : "DRAFT_ABANDONED";
     }
 
     XWikiDocument withdrawalDraft(String name, XWikiContext context) throws Exception {

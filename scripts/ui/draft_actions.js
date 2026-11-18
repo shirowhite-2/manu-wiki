@@ -100,14 +100,24 @@
       return;
     }
     if (!draftActionsSnapshot) { return; }
+    if (draft && !workspaceSnapshot) {
+      if (!workspaceLoading) {
+        workspaceLoading = true;
+        fetch(WORKSPACE_URL + '&reference=' + encodeURIComponent(reference), { credentials: 'same-origin', cache: 'no-store' })
+          .then(actionResponse).then(function (body) { workspaceSnapshot = JSON.parse(body); renderDraftActions(); })
+          .catch(function () { workspaceLoading = false; });
+      }
+      return;
+    }
+    var abandoned = draft && workspaceSnapshot.abandoned === true;
     var state = draftActionsSnapshot.status;
     if (knowledge && state === 'unstarted') { return; }
     if (draft && sessionStorage.getItem(EDIT_TARGET) &&
         sessionStorage.getItem(EDIT_TARGET) === draftActionsSnapshot.target.replace(/^xwiki:/, '')) {
       sessionStorage.removeItem(EDIT_TARGET);
-      if (state === 'draft') { location.assign(location.href.replace('/bin/view/', '/bin/edit/')); return; }
+      if (state === 'draft' && !abandoned) { location.assign(location.href.replace('/bin/view/', '/bin/edit/')); return; }
     }
-    var editable = draft && ['unstarted', 'draft'].includes(state);
+    var editable = draft && !abandoned && ['unstarted', 'draft'].includes(state);
     if (editable && sessionStorage.getItem(PREVIEW_PREFIX + reference) === '1' && !previewSaving && !previewSaved) {
       previewSaving = true;
       var selected = readChosenCategory(reference);
@@ -127,9 +137,9 @@
       card.innerHTML = '<strong></strong><p></p><div class="luxpedia-draft-buttons"></div>';
       content.parentNode.insertBefore(card, content);
     }
-    card.hidden = !editable && !knowledge && !withdrawVersion;
-    text(card.querySelector('strong'), t(knowledge ? 'editArticle' : editable ? 'previewTitle' : 'pendingTitle'));
-    text(card.querySelector('p'), t(knowledge ? 'editArticleHint' : editable ? 'previewHint' : 'withdrawHint'));
+    card.hidden = !editable && !knowledge && !withdrawVersion && !abandoned;
+    text(card.querySelector('strong'), t(abandoned ? 'abandonedTitle' : knowledge ? 'editArticle' : editable ? 'previewTitle' : 'pendingTitle'));
+    text(card.querySelector('p'), t(abandoned ? 'abandonedHint' : knowledge ? 'editArticleHint' : editable ? 'previewHint' : 'withdrawHint'));
     var buttons = card.querySelector('.luxpedia-draft-buttons');
     function button(id, label, handler, primary) {
       var node = buttons.querySelector('#' + id);
@@ -141,7 +151,12 @@
       text(node, t(label)); node.disabled = actionPending || previewSaving || busy;
       return node;
     }
-    if (editable) {
+    if (abandoned) {
+      if (workspaceSnapshot.restore) {
+        button('luxpedia-restore-draft', 'restoreDraft', function () { workspaceButtonAction(reference, 'restore'); }, true);
+      }
+      document.querySelectorAll('.publicationworkflow-info form, .publicationworkflow-information form').forEach(function (form) { form.hidden = true; });
+    } else if (editable) {
       button('luxpedia-submit-review', 'submit', function () {
         if (busy || previewSaving) { return; }
         sessionStorage.setItem(PREFIX + reference, '1');
@@ -150,6 +165,13 @@
       button('luxpedia-continue-editing', 'continueEditing', function () {
         location.assign(location.href.replace('/bin/view/', '/bin/edit/'));
       }, false);
+      if (workspaceSnapshot.abandon) {
+        button('luxpedia-abandon-draft', 'abandonDraft', function () { workspaceButtonAction(reference, 'abandon'); }, false);
+      } else {
+        var sharedHint = card.querySelector('.luxpedia-workspace-hint');
+        if (!sharedHint) { sharedHint = document.createElement('p'); sharedHint.className = 'luxpedia-workspace-hint'; card.appendChild(sharedHint); }
+        text(sharedHint, t('workspaceSharedHint'));
+      }
       // Keep native forms for their authenticated workflow transport. Submission is explicit after preview.
       document.querySelectorAll('form').forEach(function (form) {
         var action = form.querySelector('input[name="action"]');

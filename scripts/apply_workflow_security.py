@@ -19,6 +19,13 @@ POLICY_SERVICE_MISSING
 SETUP = '''{{velocity}}
 $services.luxpediaWorkflowPolicy.initialize($request.getParameter('form_token'))
 {{/velocity}}'''
+DRAFT_WORKSPACE = '''{{velocity}}
+#if($request.getMethod() == 'POST')
+$services.luxpediaWorkflowPolicy.manageDraft($request.getParameter('reference'), $request.getParameter('version'), $request.getParameter('operation'), $request.getParameter('form_token'))
+#else
+$services.luxpediaWorkflowPolicy.draftWorkspace($request.getParameter('reference'))
+#end
+{{/velocity}}'''
 WORKFLOW_ACTIONS = '''{{velocity}}
 #if($request.getMethod() == 'POST')
 $services.luxpediaWorkflowPolicy.withdraw($request.getParameter('reference'), $request.getParameter('version'), $request.getParameter('form_token'))
@@ -82,12 +89,14 @@ def apply(module, wiki):
     wiki.ensure_object_values("LuxPedia/Workflow", "PolicyStatus", "XWiki.XWikiRights", {
         "groups": "XWiki.LuxManagers,XWiki.XWikiAdminGroup", "levels": "view", "allow": "1"})
     status, body = wiki.request("GET", "/bin/get/LuxPedia/Workflow/PolicyStatus?outputSyntax=plain")
-    verify_response(status, body, 'luxpedia-workflow-policy-6', 'PolicyStatus')
+    verify_response(status, body, 'luxpedia-workflow-policy-7', 'PolicyStatus')
     module.log("server workflow policy is active")
     wiki.ensure_page("LuxPedia/Code", "ReviewAuditClass", "Review submission audit", "Server-managed submission audit.", hidden=True)
     wiki.ensure_page("LuxPedia/Workflow", "PolicySetup", "Workflow policy setup", SETUP, hidden=True, update=True)
     wiki.ensure_object_values("LuxPedia/Workflow", "PolicySetup", "XWiki.XWikiRights", {
         "groups": "XWiki.LuxManagers,XWiki.XWikiAdminGroup", "levels": "view", "allow": "1"})
+    wiki.ensure_page('LuxPedia/Code', 'DraftWorkspaceClass', 'Draft workspace state',
+                     'Server-managed draft ownership and abandonment state.', hidden=True)
     token = wiki.form_token()
     status, body = wiki.request("POST", "/bin/get/LuxPedia/Workflow/PolicySetup?outputSyntax=plain",
                                 urllib.parse.urlencode({'form_token': token}),
@@ -98,6 +107,9 @@ def apply(module, wiki):
         'groups': 'XWiki.LuxEditors,XWiki.LuxManagers,XWiki.XWikiAdminGroup', 'levels': 'view', 'allow': '1'})
     wiki.ensure_page('LuxPedia/Workflow', 'CurrentRoles', 'Current workflow roles',
                      '{{velocity}}$services.luxpediaWorkflowPolicy.currentRoles(){{/velocity}}', hidden=True, update=True)
+    wiki.ensure_page('LuxPedia/Workflow', 'DraftWorkspace', 'Draft workspace actions', DRAFT_WORKSPACE, hidden=True, update=True)
+    wiki.ensure_object_values('LuxPedia/Workflow', 'DraftWorkspace', 'XWiki.XWikiRights', {
+        'groups': 'XWiki.LuxEditors,XWiki.LuxManagers,XWiki.XWikiAdminGroup', 'levels': 'view', 'allow': '1'})
     from apply_user_directory import apply as apply_directory
     apply_directory(module, wiki)
     for group in ("XWiki.LuxEditors", "XWiki.LuxReviewers", "XWiki.LuxReaders"):

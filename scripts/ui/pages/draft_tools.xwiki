@@ -5,3 +5,16 @@
 #end
 
 [[#lp('queue')>>LuxPedia.Workflow.ReviewQueue]] · [[#lp('editGuide')>>LuxPedia.Help.EditGuide]]
+
+
+{{html clean="false"}}
+<nav aria-label="#lp('draftViews')">
+<a class="btn btn-default" href="?draftView=active">#lp('activeDrafts')</a>
+<a class="btn btn-default" href="?draftView=mine">#lp('myDrafts')</a>
+<a class="btn btn-default" href="?draftView=abandoned">#lp('abandonedDrafts')</a>
+</nav>
+<div id="luxpedia-workspace-list" style="margin:1em 0">
+<button class="btn btn-default" type="button">#lp('abandonSelected')</button>
+<p>#lp('workspaceListHint')</p>
+</div>
+{{/html}}

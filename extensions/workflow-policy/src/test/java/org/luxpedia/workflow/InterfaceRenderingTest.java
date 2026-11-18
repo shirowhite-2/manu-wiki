@@ -42,8 +42,17 @@ class InterfaceRenderingTest {
     }
     public static class Fields {
         final String name;
-        Fields(String name) { this.name = name; }
+        final String className;
+        Fields(String name, String className) { this.name = name; this.className = className; }
         public String getValue(String field) {
+            if (className.equals(DraftWorkspace.CLASS)) {
+                return switch (field) {
+                    case "status" -> name.startsWith("Abandoned ") ? "abandoned" : "active";
+                    case "owner" -> name.contains("Other") ? "xwiki:XWiki.other" : "xwiki:XWiki.owner";
+                    case "shared" -> "0";
+                    default -> "";
+                };
+            }
             return switch (field) {
                 case "target" -> "Knowledge.Technical." + "LongArticleName".repeat(30);
                 case "status" -> name.startsWith("Published ") ? "published" : name.startsWith("Archived ") ? "archived" : "validating";
@@ -58,7 +67,9 @@ class InterfaceRenderingTest {
         Page(String name, boolean visible) { this.name = name; this.visible = visible; }
         public boolean hasAccessLevel(String right) { return visible; }
         public String getDisplayTitle() { return name; }
-        public Fields getObject(String className) { return new Fields(name); }
+        public Fields getObject(String className) { return new Fields(name, className); }
+        public String getVersion() { return "4.2"; }
+        public String getCreator() { return "XWiki.owner"; }
     }
     public static class Wiki {
         public Page getDocument(String reference) {
@@ -72,10 +83,15 @@ class InterfaceRenderingTest {
         }
     }
     String renderSource(String name, String language, List<String> items) throws Exception {
+        return renderSource(name, language, items, "");
+    }
+    String renderSource(String name, String language, List<String> items, String view) throws Exception {
         var engine = new VelocityEngine(); engine.init();
         var context = new VelocityContext();
         context.put("services", Map.of("localization", new Localization(language), "query", new Query(items)));
         context.put("xwiki", new Wiki()); context.put("escapetool", new Escape());
+        context.put("xcontext", Map.of("userReference", "xwiki:XWiki.owner", "user", "XWiki.owner"));
+        context.put("request", new FilterRequest(view));
         var result = new StringWriter();
         String source = "#macro(lp $key)$services.localization.render(\"luxpedia.$key\")#end\n#lp('nextReview')\n"
             + Files.readString(UI.resolve("pages/" + name + ".xwiki"));
@@ -159,6 +175,24 @@ class InterfaceRenderingTest {
         assertFalse(table.getDocumentElement().getTextContent().contains("Archived"));
     }
 
+    public static class FilterRequest {
+        final String view;
+        FilterRequest(String view) { this.view = view; }
+        public String getParameter(String key) { return key.equals("draftView") ? view : null; }
+    }
+    @Test void abandonedDraftsLeaveAllActiveListsAndOwnersCanFindThemInTheirOwnView() throws Exception {
+        var items = List.of("First", "Other active", "Abandoned owner", "Abandoned Other");
+        for (String language : List.of("en", "zh")) {
+            String active = renderSource("drafts", language, items, "active");
+            assertFalse(active.contains("Abandoned owner")); assertFalse(active.contains("Abandoned Other"));
+            assertTrue(active.contains("First")); assertTrue(active.contains("Other active"));
+            String mine = renderSource("drafts", language, items, "mine");
+            assertTrue(mine.contains("First")); assertFalse(mine.contains("Other active"));
+            String abandoned = renderSource("drafts", language, items, "abandoned");
+            assertTrue(abandoned.contains("Abandoned owner")); assertFalse(abandoned.contains("Abandoned Other"));
+            assertFalse(abandoned.contains("First")); assertFalse(abandoned.contains("$"), abandoned);
+        }
+    }
     public static class Directory {
         final boolean allowed;
         Directory(boolean allowed) { this.allowed = allowed; }

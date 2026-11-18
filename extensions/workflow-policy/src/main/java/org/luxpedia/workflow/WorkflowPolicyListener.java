@@ -103,9 +103,19 @@ public class WorkflowPolicyListener implements EventListener
                 !context.getWiki().getDocument(new DocumentReference(context.getWikiId(), List.of("LuxPedia", "Workflow"), "Config"), context).isNew()) {
                 registerPublishedTarget(doc, context);
             }
+            if (!deleting && space.equals("Knowledge") && workflowOperation().equals("publish")) {
+                doc.removeObjects(DraftWorkspace.CLASS);
+            }
             if (!deleting && space.equals("Drafts") && next != null &&
                 Set.of("publish", "editDraft", "createDraftDocument").contains(workflowOperation())) {
                 doc.setHidden(status(next).equals("published"));
+            }
+            if (!deleting && space.equals("Drafts") && !ref.getName().equals("WebPreferences") &&
+                !(ref.getSpaceReferences().size() == 1 && ref.getName().equals("WebHome"))) {
+                if (DraftWorkspace.contentChanged(old, doc) || Set.of("editDraft", "createDraftDocument").contains(workflowOperation())) {
+                    DraftWorkspace.track(this, doc, old, user, context,
+                        Set.of("editDraft", "createDraftDocument").contains(workflowOperation()));
+                }
             }
             return;
         }
@@ -139,12 +149,15 @@ public class WorkflowPolicyListener implements EventListener
                 independentReviewer(draft, user);
                 // Never carry draft audit objects into published copies.
                 doc.removeObjects(AUDIT);
+                doc.removeObjects(DraftWorkspace.CLASS);
                 return;
             }
             require((editor || reviewer) && commentsOnly(old, doc, context),
                 "Published content is read-only. Edit its draft instead.");
             return;
         }
+        require(!DraftWorkspace.abandoned(old) || operation.equals("restoreDraft"),
+            "Restore the abandoned draft before editing or submitting it.");
         String before = status(previous);
         String after = status(next);
         switch (operation) {
@@ -158,9 +171,11 @@ public class WorkflowPolicyListener implements EventListener
                 require(editor && old.isNew() && after.equals("draft"), "Only editors may create a linked draft.");
                 validWorkflow(next, ref, context);
                 normalizeEditorContent(doc, user);
+                DraftWorkspace.track(this, doc, old, user, context, true);
                 break;
             case "editDraft":
                 require(editor && before.equals("published") && after.equals("draft"), "Only editors may reopen published drafts.");
+                DraftWorkspace.track(this, doc, old, user, context, true);
                 break;
             case "submitForModeration":
             case "submitForValidation":
@@ -182,6 +197,12 @@ public class WorkflowPolicyListener implements EventListener
                 require(after.equals(operation.equals("publish") ? "published" : operation.equals("validate") ? "valid" : "draft"),
                     "Unexpected review transition.");
                 break;
+            case "abandonDraft":
+            case "restoreDraft":
+                boolean restore = operation.equals("restoreDraft");
+                require(DraftWorkspace.allowed(this, old, context, restore) && before.equals(after) &&
+                    DraftWorkspace.abandoned(doc) != restore, "Draft workspace operation is not allowed.");
+                break;
             case "withdrawSubmission":
                 require(canWithdraw(old, context) && after.equals("draft"),
                     "Only the submitter may withdraw a pending review request.");
@@ -196,12 +217,15 @@ public class WorkflowPolicyListener implements EventListener
                 require(editor && (previous == null || before.equals("draft")),
                     "Only editors may edit draft content; submitted content is locked.");
                 normalizeEditorContent(doc, user);
+                if (!(ref.getSpaceReferences().size() == 1 && ref.getName().equals("WebHome"))) {
+                    DraftWorkspace.track(this, doc, old, user, context, false);
+                }
                 return;
             default:
                 require(false, "This workflow operation is reserved for administrators.");
         }
         // Upstream grants EDIT to validators. Replace those rules on every native transition.
-        doc.setHidden(after.equals("published"));
+        doc.setHidden(after.equals("published") || DraftWorkspace.abandoned(doc));
         if (doc.getTranslation() == 0) { normalizeDraftRights(doc, after, context); }
     }
 
@@ -304,11 +328,12 @@ public class WorkflowPolicyListener implements EventListener
 
     void normalizeDraftRights(XWikiDocument doc, String state, XWikiContext context) throws Exception {
         doc.removeObjects("XWiki.XWikiRights");
-        right(doc, "XWiki.LuxEditors", state.equals("draft") ? "view,comment,edit" : "view", true, context);
+        boolean editable = (state.isEmpty() || state.equals("draft")) && !DraftWorkspace.abandoned(doc);
+        right(doc, "XWiki.LuxEditors", editable ? "view,comment,edit" : "view", true, context);
         right(doc, "XWiki.LuxReviewers", "view,comment", true, context);
         // A page-level grant from upstream or creator rights must never expose deletion.
         right(doc, "XWiki.LuxEditors,XWiki.LuxReviewers", "delete", false, context);
-        if (!state.equals("draft")) {
+        if (!editable) {
             right(doc, "XWiki.LuxEditors,XWiki.LuxReviewers", "edit", false, context);
         }
         // No explicit edit DENY for reviewers: that would also block an editor who has both roles.
@@ -327,13 +352,18 @@ public class WorkflowPolicyListener implements EventListener
     /** Trust Java API execution, never an HTTP action parameter or a client-set flag. */
     String workflowOperation() {
         return StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE).walk(frames -> frames
-            .filter(frame -> (frame.getDeclaringClass() == WorkflowPolicyScriptService.class && frame.getMethodName().equals("withdraw")) ||
+            .filter(frame -> (frame.getDeclaringClass() == WorkflowPolicyScriptService.class && Set.of("withdraw", "manageDraft").contains(frame.getMethodName())) ||
                 (frame.getClassName().equals("org.xwiki.workflowpublication.internal.DefaultPublicationWorkflow") &&
                 Set.of("startWorkflow", "startWorkflowAsTarget", "createDraftDocument", "editDraft",
                 "submitForModeration", "submitForValidation", "validate", "publish", "refuseValidation",
                 "refuseModeration", "archive", "unpublish", "unarchive", "publishFromArchive").contains(frame.getMethodName())))
-            .map(frame -> frame.getDeclaringClass() == WorkflowPolicyScriptService.class ? "withdrawSubmission" : frame.getMethodName())
+            .map(frame -> frame.getDeclaringClass() == WorkflowPolicyScriptService.class ?
+                (frame.getMethodName().equals("withdraw") ? "withdrawSubmission" : workspaceOperation()) : frame.getMethodName())
             .findFirst().orElse(""));
+    }
+
+    private String workspaceOperation() {
+        return WorkflowPolicyScriptService.WORKSPACE_OPERATION.get();
     }
 
     static String status(BaseObject object) { return object == null ? "" : object.getStringValue("status"); }
@@ -363,7 +393,7 @@ public class WorkflowPolicyListener implements EventListener
         new IdentityDirectory(this, context).initialize();
     }
 
-    public String getPolicyVersion() { return "luxpedia-workflow-policy-6"; }
+    public String getPolicyVersion() { return "luxpedia-workflow-policy-7"; }
     /** Deployment migration: remove historical validator EDIT grants without re-authoring content. */
     public int repairExistingDraftRights(XWikiContext context) throws Exception {
         require(authorization.hasAccess(Right.ADMIN, context.getUserReference(),
@@ -381,7 +411,7 @@ public class WorkflowPolicyListener implements EventListener
             XWikiDocument original = context.getWiki().getDocument(reference, context);
             XWikiDocument draft = original.clone();
             normalizeDraftRights(draft, status(draft.getObject(WF)), context);
-            draft.setHidden(status(draft.getObject(WF)).equals("published"));
+            draft.setHidden(status(draft.getObject(WF)).equals("published") || DraftWorkspace.abandoned(draft));
             draft.setContentAuthorReference(original.getContentAuthorReference());
             context.getWiki().saveDocument(draft, "Normalize LuxPedia workflow role permissions", true, context);
             repaired++;

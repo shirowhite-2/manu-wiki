@@ -430,6 +430,37 @@ class WorkflowPolicyListenerTest {
             }), "Missing explicit DELETE denial for " + state);
         }
     }
+    @Test void abandonedDraftsCannotBeEditedSubmittedOrForgedThroughRest() throws Exception {
+        states("draft", "draft");
+        BaseObject workspace = mock(BaseObject.class);
+        when(workspace.getStringValue("status")).thenReturn("abandoned");
+        when(old.getObject(DraftWorkspace.CLASS)).thenReturn(workspace);
+        for (String operation : List.of("", "submitForValidation", "submitForModeration")) {
+            policy.operation = operation;
+            assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
+        }
+        when(old.getObject(DraftWorkspace.CLASS)).thenReturn(null);
+        policy.operation = ""; changedClass(DraftWorkspace.CLASS);
+        assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
+    }
+    @Test void trustedAbandonmentLocksTheDraftAndTrustedRestorationUnlocksIt() throws Exception {
+        states("draft", "draft");
+        BaseObject previous = mock(BaseObject.class), next = mock(BaseObject.class);
+        when(previous.getStringValue("owner")).thenReturn(user.toString());
+        when(previous.getStringValue("shared")).thenReturn("0");
+        when(previous.getStringValue("status")).thenReturn("active");
+        when(next.getStringValue("status")).thenReturn("abandoned");
+        when(old.getObject(DraftWorkspace.CLASS)).thenReturn(previous);
+        when(doc.getObject(DraftWorkspace.CLASS)).thenReturn(next);
+        when(policy.authorization.hasAccess(eq(Right.EDIT), any(), any())).thenReturn(true);
+        policy.operation = "abandonDraft";
+        policy.check(doc, context, false); verify(doc).setHidden(true);
+        when(previous.getStringValue("status")).thenReturn("abandoned");
+        when(next.getStringValue("status")).thenReturn("active");
+        when(policy.authorization.hasAccess(eq(Right.EDIT), any(), any())).thenReturn(false);
+        policy.operation = "restoreDraft";
+        policy.check(doc, context, false); verify(doc).setHidden(false);
+    }
     @Test void administratorKeepsRecoveryAccess() {
         when(policy.authorization.hasAccess(eq(Right.ADMIN), eq(user), any())).thenReturn(true);
         states(null, "published"); assertDoesNotThrow(() -> policy.check(doc, context, true));

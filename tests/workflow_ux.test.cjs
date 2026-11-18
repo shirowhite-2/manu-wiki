@@ -33,8 +33,9 @@ async function wikiFixture(options = {}) {
     target: options.linkedTarget || '',
     category: options.primaryCategory || '',
     hasArticle: options.hasArticle !== false,
-    actions: [], alerts: [], errors: [], withdrawals: [], confirmations: 0,
+    actions: [], alerts: [], errors: [], withdrawals: [], workspaceActions: [], confirmations: 0,
   };
+  const workspaceStates = { [reference]: !!options.abandoned };
   page.on('pageerror', error => state.errors.push(error.message));
   page.on('dialog', async dialog => {
     if (dialog.type() === 'confirm') { state.confirmations++; } else { state.alerts.push(dialog.message()); }
@@ -70,6 +71,8 @@ async function wikiFixture(options = {}) {
       <div id="document-title"><h1>New article</h1></div>
       ${edit ? `<div><textarea id="xwikieditor"></textarea></div>
         <button class="realtime-action-done" onclick="location.href='${viewPath}'">Done</button>` : '<div class="panel"><h2 class="panel-title">Workflow</h2><div class="publicationworkflow-info">' + workflow + '</div></div>'}
+      ${options.list ? '<div id="luxpedia-workspace-list"><button type="button">Abandon selected drafts</button></div>' +
+        options.list.map(name => '<input type="checkbox" class="luxpedia-draft-select" data-reference="' + name + '" data-version="4.2">').join('') : ''}
       <div id="xwikicontent"><article id="user-content">用户撰写的正文 stays unchanged.</article></div>
       <script>${ux}</script>`;
   }
@@ -78,6 +81,24 @@ async function wikiFixture(options = {}) {
     const url = new URL(request.url());
     const pathname = decodeURIComponent(url.pathname);
     const json = body => route.fulfill({ json: body });
+    if (pathname === '/bin/get/LuxPedia/Workflow/DraftWorkspace') {
+      const name = url.searchParams.get('reference');
+      const actor = options.admin || !['reviewer', 'reader'].includes(options.role);
+      const canAbandon = actor && (options.admin || options.ownWorkspace !== false && !options.sharedWorkspace);
+      if (request.method() === 'GET') {
+        return json({ abandoned: !!workspaceStates[name], abandon: canAbandon && !workspaceStates[name] &&
+          ['', 'draft'].includes(state.status), restore: actor && !!workspaceStates[name], version: '4.2' });
+      }
+      const fields = Object.fromEntries(new URLSearchParams(request.postData()));
+      state.workspaceActions.push(fields);
+      if (options.workspaceReject === fields.reference || options.workspaceFail || fields.version !== '4.2' ||
+          fields.form_token !== 'test-token') { return route.fulfill({ body: 'WORKSPACE_CONFLICT' }); }
+      const restoring = fields.operation === 'restore';
+      if (!actor || !['', 'draft'].includes(state.status) || restoring !== !!workspaceStates[fields.reference] ||
+          !restoring && !canAbandon) { return route.fulfill({ body: 'WORKSPACE_FORBIDDEN' }); }
+      workspaceStates[fields.reference] = !restoring;
+      return route.fulfill({ body: restoring ? 'DRAFT_RESTORED' : 'DRAFT_ABANDONED' });
+    }
     if (pathname === '/bin/get/LuxPedia/Workflow/Actions') {
       if (request.method() === 'GET') {
         return route.fulfill({ body: 'WITHDRAW_VERSION=' + (options.ownSubmission !== false && state.status === 'validating' ? '4.2' : '') });
@@ -576,6 +597,73 @@ for (const status of [401, 403, 500]) {
     } finally { await wiki.context.close(); }
   });
 }
+
+test('owner can abandon and restore a saved draft without publishing or deleting it', async () => {
+  const reference = 'Drafts.NewArticle.WebHome';
+  const wiki = await wikiFixture({ reference, status: 'draft', linkedTarget: 'Knowledge.Technical.NewArticle', nativeEdit: true });
+  try {
+    const url = wiki.origin + '/bin/view/Drafts/NewArticle/WebHome';
+    await wiki.page.goto(url);
+    await wiki.page.locator('#luxpedia-abandon-draft').click();
+    await wiki.page.waitForURL(wiki.origin + '/bin/view/Drafts/');
+    assert.equal(wiki.state.workspaceActions[0].operation, 'abandon');
+    assert.equal(wiki.state.workspaceActions[0].form_token, 'test-token');
+    assert.equal(wiki.state.status, 'draft');
+    await wiki.page.goto(url);
+    await wiki.page.locator('#luxpedia-restore-draft').waitFor();
+    await wiki.page.waitForFunction(() => document.querySelector('.luxpedia-state')?.textContent === 'Abandoned');
+    assert.equal(await wiki.page.locator('#tmEdit').isVisible(), false);
+    assert.equal(await wiki.page.locator('#luxpedia-submit-review').count(), 0);
+    assert.equal(await wiki.page.locator('#luxpedia-continue-editing').count(), 0);
+    await wiki.page.locator('#luxpedia-restore-draft').click();
+    await wiki.page.locator('#luxpedia-submit-review').waitFor();
+    assert.deepEqual(wiki.state.workspaceActions.map(action => action.operation), ['abandon', 'restore']);
+    assert.deepEqual(wiki.state.actions, []);
+    assert.equal(await wiki.page.locator('#user-content').textContent(), '用户撰写的正文 stays unchanged.');
+    assert.deepEqual(wiki.state.errors, []);
+  } finally { await wiki.context.close(); }
+});
+
+for (const options of [{ sharedWorkspace: true }, { ownWorkspace: false }, { status: 'validating' }]) {
+  test('shared, other-owned or submitted drafts do not expose abandonment ' + JSON.stringify(options), async () => {
+    const wiki = await wikiFixture({ status: 'draft', ...options });
+    try {
+      await wiki.page.goto(wiki.origin + '/bin/view/Drafts/NewArticle/WebHome');
+      await wiki.page.waitForFunction(() => document.querySelector('#luxpedia-draft-actions'));
+      assert.equal(await wiki.page.locator('#luxpedia-abandon-draft').count(), 0);
+      assert.deepEqual(wiki.state.workspaceActions, []);
+      assert.deepEqual(wiki.state.errors, []);
+    } finally { await wiki.context.close(); }
+  });
+}
+
+test('stale abandonment is reported without hiding or submitting the draft', async () => {
+  const wiki = await wikiFixture({ status: 'draft', workspaceFail: true });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/view/Drafts/NewArticle/WebHome');
+    await wiki.page.locator('#luxpedia-abandon-draft').click();
+    await wiki.page.waitForFunction(() => !document.querySelector('#luxpedia-abandon-draft').disabled);
+    assert.equal(wiki.state.status, 'draft');
+    assert.match(wiki.state.alerts[0], /could not be completed/);
+    assert.deepEqual(wiki.state.actions, []);
+  } finally { await wiki.context.close(); }
+});
+
+test('a bulk abandonment reports partial failures and keeps independent versioned requests', async () => {
+  const wiki = await wikiFixture({ reference: 'Drafts.WebHome', status: 'draft',
+    list: ['Drafts.First', 'Drafts.Second'], workspaceReject: 'Drafts.Second' });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/view/Drafts/');
+    await wiki.page.locator('#luxpedia-workspace-list[data-bound="1"]').waitFor();
+    for (const row of await wiki.page.locator('.luxpedia-draft-select').all()) { await row.check(); }
+    await wiki.page.locator('#luxpedia-workspace-list button').click();
+    await wiki.page.waitForFunction(() => document.querySelectorAll('.luxpedia-draft-select:checked').length === 0);
+    assert.deepEqual(wiki.state.workspaceActions.map(action => action.reference), ['Drafts.First', 'Drafts.Second']);
+    assert.ok(wiki.state.workspaceActions.every(action => action.version === '4.2' && action.form_token === 'test-token'));
+    assert.match(wiki.state.alerts[0], /1 drafts could not be abandoned/);
+    assert.deepEqual(wiki.state.errors, []);
+  } finally { await wiki.context.close(); }
+});
 
 test('native Edit on Knowledge/test opens its linked draft instead of editing the published copy', async () => {
   const wiki = await wikiFixture({ reference: 'Knowledge.test.WebHome', status: 'published',
