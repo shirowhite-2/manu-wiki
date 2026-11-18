@@ -66,7 +66,7 @@ class FakeWiki:
     def request(self, method, path, data=None, content_type=None, **kwargs):
         self.requests.append((method, path, data))
         if 'PolicyStatus?' in path:
-            return 200, b'luxpedia-workflow-policy-7' if self.policy else b'POLICY_NOT_INSTALLED'
+            return 200, b'luxpedia-workflow-policy-8' if self.policy else b'POLICY_NOT_INSTALLED'
         if 'PolicySetup?' in path:
             return 200, b'AUDIT_CLASS_READY'
         if '/translations/' in path:
@@ -459,11 +459,11 @@ class InterfaceConfigTest(unittest.TestCase):
     def test_script_denial_is_not_reported_as_a_missing_jar(self):
         body = b'Failed to execute the [groovy] macro. The execution of the [groovy] script macro is not allowed.'
         with self.assertRaisesRegex(RuntimeError, 'page author cannot execute'):
-            security.verify_response(200, body, 'luxpedia-workflow-policy-7', 'PolicyStatus')
+            security.verify_response(200, body, 'luxpedia-workflow-policy-8', 'PolicyStatus')
 
     def test_policy_marker_accepts_plain_or_rendered_output(self):
-        for body in (b'luxpedia-workflow-policy-7\n', b'<p>luxpedia-workflow-policy-7</p>'):
-            security.verify_response(200, body, 'luxpedia-workflow-policy-7', 'PolicyStatus')
+        for body in (b'luxpedia-workflow-policy-8\n', b'<p>luxpedia-workflow-policy-8</p>'):
+            security.verify_response(200, body, 'luxpedia-workflow-policy-8', 'PolicyStatus')
 
     def test_admin_and_token_errors_are_distinct(self):
         with self.assertRaisesRegex(RuntimeError, 'wiki-level administrator'):

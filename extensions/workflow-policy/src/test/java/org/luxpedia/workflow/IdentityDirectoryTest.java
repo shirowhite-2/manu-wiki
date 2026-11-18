@@ -165,4 +165,92 @@ class IdentityDirectoryTest {
         verify(doc).setContentAuthorReference(author);
         verify(doc, never()).setContent(anyString());
     }
+
+    BaseObject nativeRule(String groups, String users, String levels, int allow) throws Exception {
+        BaseObject object = spy(new BaseObject());
+        // Real XWiki field classes produce StringProperty, even though the fields
+        // conceptually hold lists. Keep the core parser in the fixture's write path.
+        for (var entry : Map.of("groups", groups, "users", users, "levels", levels).entrySet()) {
+            object.safeput(entry.getKey(), nativeAclProperty(entry.getKey(), entry.getValue()));
+        }
+        object.setIntValue("allow", allow);
+        doAnswer(call -> {
+            String key = call.getArgument(0); Object value = call.getArgument(1);
+            if (key.equals("allow")) { object.setIntValue(key, (int) value); }
+            else { object.safeput(key, nativeAclProperty(key, value.toString())); }
+            return null;
+        }).when(object).set(anyString(), any(), eq(context));
+        return object;
+    }
+
+    com.xpn.xwiki.objects.BaseProperty<?> nativeAclProperty(String field, String value) throws Exception {
+        return switch (field) {
+            case "groups" -> new com.xpn.xwiki.objects.classes.GroupsClass().fromString(value);
+            case "users" -> new com.xpn.xwiki.objects.classes.UsersClass().fromString(value);
+            case "levels" -> new com.xpn.xwiki.objects.classes.LevelsClass().fromString(value);
+            default -> throw new IllegalArgumentException(field);
+        };
+    }
+
+    @Test void nativeAclInitializationSurvivesTheSecondNormalizationDuringSave() throws Exception {
+        var rights = new ArrayList<BaseObject>();
+        XWikiDocument doc = identity(false, rights), original = mock(XWikiDocument.class);
+        DocumentReference ref = new DocumentReference("xwiki", "XWiki", "LuxManagers");
+        when(doc.getDocumentReference()).thenReturn(ref); when(original.clone()).thenReturn(doc);
+        when(doc.newXObject(any(DocumentReference.class), eq(context))).thenAnswer(call -> {
+            BaseObject object = nativeRule("", "", "", 0); rights.add(object); return object;
+        });
+        Query profiles = mock(Query.class, RETURNS_SELF), groups = mock(Query.class, RETURNS_SELF);
+        when(policy.queries.createQuery(contains("as profile where"), eq(Query.XWQL))).thenReturn(profiles);
+        when(policy.queries.createQuery(contains("as membership where"), eq(Query.XWQL))).thenReturn(groups);
+        when(profiles.execute()).thenReturn(List.of()); when(groups.execute()).thenReturn(List.of("XWiki.LuxManagers"));
+        var wiki = mock(com.xpn.xwiki.XWiki.class); when(context.getWiki()).thenReturn(wiki);
+        when(wiki.getDocument(ref, context)).thenReturn(original);
+        XWikiDocument absent = mock(XWikiDocument.class); when(absent.isNew()).thenReturn(true);
+        when(wiki.getDocument(new DocumentReference("xwiki", "XWiki", "WebHome"), context)).thenReturn(absent);
+        doAnswer(call -> {
+            // initialize() prepares the ACL, then the save listener reads it again.
+            assertInstanceOf(com.xpn.xwiki.objects.StringProperty.class, rights.get(0).safeget("levels"));
+            assertThrows(ClassCastException.class, () -> rights.get(0).getListValue("levels"));
+            assertFalse(directory.normalizeView(doc));
+            return null;
+        }).when(wiki).saveDocument(eq(doc), anyString(), eq(true), eq(context));
+        directory.initialize(); directory.initialize();
+        verify(wiki).saveDocument(doc, "Restrict account directory visibility", true, context);
+        assertEquals("view", rights.get(0).getStringValue("levels"));
+        assertEquals(IdentityDirectory.ADMINS, rights.get(0).getStringValue("groups"));
+    }
+
+    @Test void mixedNativeStringAndLegacyListAclFieldsKeepNonViewRightsAndProfileOwnership() throws Exception {
+        var rights = new ArrayList<BaseObject>();
+        BaseObject nativeGrant = nativeRule("XWiki.Team With Spaces", "", "view,edit", 1);
+        BaseObject programming = nativeRule("", "XWiki.Developer", "programming", 1);
+        rights.add(nativeGrant); rights.add(programming);
+        rights.add(rule("", "XWiki.other", "view,comment", 1));
+        XWikiDocument doc = identity(true, rights);
+        assertTrue(directory.normalizeView(doc));
+        assertEquals("edit", nativeGrant.getStringValue("levels"));
+        assertEquals(List.of("XWiki.Team With Spaces"), IdentityDirectory.rightsValues(nativeGrant, "groups"));
+        assertEquals(List.of("comment"), IdentityDirectory.rightsValues(rights.get(2), "levels"));
+        verify(programming, never()).set(anyString(), any(), any());
+        assertTrue(rights.stream().anyMatch(rule -> IdentityDirectory.rightsValues(rule, "users")
+            .equals(List.of("xwiki:XWiki.alice")) && IdentityDirectory.rightsValues(rule, "levels").equals(List.of("view"))));
+        assertFalse(directory.normalizeView(doc));
+    }
+
+    @Test void absentAndEmptyAclValuesAreSupportedAndUnexpectedTypesStopBeforeMutation() throws Exception {
+        BaseObject empty = new BaseObject();
+        assertEquals(List.of(), IdentityDirectory.rightsValues(empty, "groups"));
+        BaseObject nativeEmpty = nativeRule("", "", "", 0);
+        for (String field : List.of("levels", "groups", "users")) {
+            assertEquals(List.of(), IdentityDirectory.rightsValues(nativeEmpty, field));
+        }
+        BaseObject malformed = new BaseObject(); malformed.setIntValue("levels", 9);
+        var rights = new ArrayList<BaseObject>(); rights.add(malformed);
+        XWikiDocument doc = identity(false, rights);
+        assertThrows(IllegalArgumentException.class, () -> directory.normalizeView(doc));
+        assertEquals(9, malformed.getIntValue("levels"));
+        verify(doc, never()).newXObject(any(DocumentReference.class), any());
+        verify(doc, never()).removeXObject(any(BaseObject.class));
+    }
 }

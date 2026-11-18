@@ -393,7 +393,7 @@ public class WorkflowPolicyListener implements EventListener
         new IdentityDirectory(this, context).initialize();
     }
 
-    public String getPolicyVersion() { return "luxpedia-workflow-policy-7"; }
+    public String getPolicyVersion() { return "luxpedia-workflow-policy-8"; }
     /** Deployment migration: remove historical validator EDIT grants without re-authoring content. */
     public int repairExistingDraftRights(XWikiContext context) throws Exception {
         require(authorization.hasAccess(Right.ADMIN, context.getUserReference(),

@@ -14,6 +14,10 @@ import org.xwiki.query.Query;
 import com.xpn.xwiki.XWikiContext;
 import com.xpn.xwiki.doc.XWikiDocument;
 import com.xpn.xwiki.objects.BaseObject;
+import com.xpn.xwiki.objects.BaseProperty;
+import com.xpn.xwiki.objects.classes.GroupsClass;
+import com.xpn.xwiki.objects.classes.LevelsClass;
+import com.xpn.xwiki.objects.classes.UsersClass;
 
 /** Canonical account references stay in XWiki; role folders are directory views. */
 final class IdentityDirectory {
@@ -37,25 +41,53 @@ final class IdentityDirectory {
             (doc.getObject("XWiki.XWikiUsers") != null || doc.getObject("XWiki.XWikiGroups") != null);
     }
 
+    /** Native rights fields use strings; older/custom schemas can use list properties. */
+    static List<String> rightsValues(BaseObject object, String field) {
+        var stored = object.safeget(field);
+        if (stored == null) { return List.of(); }
+        if (!(stored instanceof BaseProperty<?> property)) {
+            throw new IllegalArgumentException("Unsupported ACL property for " + field);
+        }
+        Object value = property.getValue();
+        if (value == null) { return List.of(); }
+        if (value instanceof List<?> values) {
+            List<String> result = new ArrayList<>();
+            for (Object entry : values) {
+                if (!(entry instanceof String text)) { throw new IllegalArgumentException("Non-text ACL entry for " + field); }
+                result.add(text);
+            }
+            return result;
+        }
+        if (value instanceof String text) {
+            return switch (field) {
+                case "levels" -> LevelsClass.getListFromString(text);
+                case "groups" -> GroupsClass.getListFromString(text);
+                case "users" -> UsersClass.getListFromString(text);
+                default -> throw new IllegalArgumentException("Unsupported ACL field " + field);
+            };
+        }
+        throw new IllegalArgumentException("Unsupported ACL value for " + field);
+    }
+
     /** Replace VIEW only, preserving EDIT and every other right, including programming. */
     boolean normalizeView(XWikiDocument doc) throws Exception {
         String owner = doc.getObject("XWiki.XWikiUsers") != null ? doc.getDocumentReference().toString() : "";
         List<BaseObject> objects = doc.getXObjects(policy.resolver.resolve(RIGHTS, doc.getDocumentReference()));
         List<BaseObject> view = objects == null ? List.of() : objects.stream().filter(o -> o != null &&
-            o.getListValue("levels").contains("view")).toList();
+            rightsValues(o, "levels").contains("view")).toList();
         boolean adminFound = false, ownerFound = owner.isEmpty();
         boolean clean = view.size() == (owner.isEmpty() ? 1 : 2);
         for (BaseObject object : view) {
-            boolean allow = object.getIntValue("allow") == 1 && object.getListValue("levels").equals(List.of("view"));
-            if (allow && new HashSet<>(object.getListValue("groups")).equals(Set.of(ADMINS.split(","))) && object.getListValue("users").isEmpty()) {
+            boolean allow = object.getIntValue("allow") == 1 && rightsValues(object, "levels").equals(List.of("view"));
+            if (allow && new HashSet<>(rightsValues(object, "groups")).equals(Set.of(ADMINS.split(","))) && rightsValues(object, "users").isEmpty()) {
                 adminFound = true;
-            } else if (allow && !owner.isEmpty() && object.getListValue("users").equals(List.of(owner)) &&
-                    object.getListValue("groups").isEmpty()) { ownerFound = true; }
+            } else if (allow && !owner.isEmpty() && rightsValues(object, "users").equals(List.of(owner)) &&
+                    rightsValues(object, "groups").isEmpty()) { ownerFound = true; }
             else { clean = false; }
         }
         if (clean && adminFound && ownerFound) { return false; }
         for (BaseObject object : view) {
-            String remaining = String.join(",", ((List<?>) object.getListValue("levels")).stream().map(Object::toString)
+            String remaining = String.join(",", rightsValues(object, "levels").stream()
                 .filter(level -> !level.isEmpty() && !level.equals("view")).toList());
             if (remaining.isEmpty()) { doc.removeXObject(object); }
             else { object.set("levels", remaining, context); }
