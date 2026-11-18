@@ -336,8 +336,10 @@ class XWiki:
 
     @staticmethod
     def page_path(space, page):
-        space_path = "/spaces/".join(part for part in space.split("/") if part)
-        return f"/rest/wikis/xwiki/spaces/{space_path}/pages/{page}"
+        # Inputs are logical names, not URL fragments. Encode each name once so
+        # Unicode and reserved characters cannot change the resource hierarchy.
+        space_path = "/spaces/".join(urllib.parse.quote(part, safe="") for part in space.split("/") if part)
+        return f"/rest/wikis/xwiki/spaces/{space_path}/pages/{urllib.parse.quote(page, safe='')}"
 
     def page_exists(self, space, page):
         status, _ = self.request("GET", self.page_path(space, page))
@@ -374,7 +376,7 @@ class XWiki:
         return sorted(result)
 
     def object_values(self, space, page, class_name, number):
-        path = self.page_path(space, page) + f"/objects/{class_name}/{number}/properties"
+        path = self.page_path(space, page) + f"/objects/{urllib.parse.quote(class_name, safe='')}/{number}/properties"
         status, body = self.request("GET", path)
         if status != 200:
             return {}
@@ -409,7 +411,7 @@ class XWiki:
         return True
 
     def set_object_property(self, space, page, class_name, number, name, value):
-        path = self.page_path(space, page) + f"/objects/{class_name}/{number}/properties/{name}"
+        path = self.page_path(space, page) + f"/objects/{urllib.parse.quote(class_name, safe='')}/{number}/properties/{urllib.parse.quote(name, safe='')}"
         status, body = self.request(
             "PUT", path, value, "text/plain", token=self.form_token()
         )
@@ -441,7 +443,7 @@ class XWiki:
         return self.add_object("XWiki", group_page, "XWiki.XWikiGroups", {"member": member})
 
     def attachment_exists(self, space, page, name):
-        path = self.page_path(space, page) + "/attachments/" + urllib.parse.quote(name)
+        path = self.page_path(space, page) + "/attachments/" + urllib.parse.quote(name, safe="")
         status, _ = self.request("GET", path)
         return status == 200
 
@@ -453,7 +455,7 @@ class XWiki:
         if not source.is_file():
             raise RuntimeError(f"附件源文件不存在: {source}")
         content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
-        path = self.page_path(space, page) + "/attachments/" + urllib.parse.quote(name)
+        path = self.page_path(space, page) + "/attachments/" + urllib.parse.quote(name, safe="")
         status, body = self.request("PUT", path, source.read_bytes(), content_type)
         if status not in (201, 202):
             raise RuntimeError(f"上传附件失败 {space}.{page}@{name}: {status} {body[:300]}")

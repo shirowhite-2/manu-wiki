@@ -647,7 +647,7 @@ def knowledge_categories(wiki):
     for href, label in parser.links:
         match = re.match(r"^/bin/view/Knowledge/([^/?#]+)/?(?:WebHome)?$", href)
         if match and label and label not in ("知识库", "文档库", "分类索引", "分类说明"):
-            result[label] = match.group(1)
+            result[label] = urllib.parse.unquote(match.group(1))
     return result
 
 
@@ -704,7 +704,7 @@ def bootstrap_workflow_targets(module, wiki):
         for href, _ in parser.links:
             match = re.match(r"^/bin/view/Drafts/([^/?#]+)$", href)
             if match and match.group(1) != "WebHome":
-                draft_pages.add(match.group(1))
+                draft_pages.add(urllib.parse.unquote(match.group(1)))
     for page in sorted(draft_pages):
         objects = wiki.objects("Drafts", page, "LuxPedia.Code.ArticleClass")
         if not objects or wiki.has_object("Drafts", page, "PublicationWorkflow.PublicationWorkflowClass"):
