@@ -235,11 +235,13 @@ class InterfaceConfigTest(unittest.TestCase):
             workflow.restore_draft_creation(Module, wiki)
         self.assertEqual(len(wiki.rules), 1)
 
-    def test_new_article_entry_uses_native_form_and_article_template(self):
+    def test_new_article_entry_uses_native_chooser_without_forcing_a_template(self):
         content = interface.DRAFT_TOOLS
         self.assertIn("#if($doc.hasAccessLevel('edit'))", content)
         self.assertIn("$xwiki.getURL('Drafts.WebHome', 'create',", content)
-        self.assertIn('spaceReference=Drafts&parent=Drafts.WebHome&template=LuxPedia.Templates.Article', content)
+        self.assertIn('spaceReference=Drafts&parent=Drafts.WebHome', content)
+        self.assertNotIn('&template=', content)
+        self.assertNotIn('&templateprovider=', content)
         self.assertIn("#lp('newArticle')", content)
         self.assertEqual(MESSAGES['en']['newArticle'], 'New article')
         self.assertEqual(MESSAGES['zh']['newArticle'], '新建文章')
@@ -386,6 +388,28 @@ class InterfaceConfigTest(unittest.TestCase):
         self.assertEqual(len([1 for method, path, data in wiki.requests
                               if method == 'PUT' and '/spaces/Archive/' in path]), 1)
 
+    def test_native_article_template_choice_is_scoped_to_drafts_and_preserves_custom_templates(self):
+        wiki = FakeWiki()
+        custom = '= Team template =\n\nKeep this custom template body.'
+        wiki.article_template = custom
+        other = ('OtherApp', 'Provider', 'XWiki.TemplateProviderClass')
+        wiki.object_data[other] = {'name': 'Other template', 'template': 'OtherApp.Template'}
+        interface.apply(Module, wiki)
+        interface.apply(Module, wiki)
+        provider = wiki.object_data[('LuxPedia/Templates', 'ArticleProvider', 'XWiki.TemplateProviderClass')]
+        self.assertEqual(provider['template'], 'LuxPedia.Templates.Article')
+        self.assertEqual(provider['action'], 'edit')
+        self.assertEqual(provider['terminal'], '0')
+        self.assertEqual(provider['creationRestrictions'], 'Drafts')
+        self.assertEqual(provider['visibilityRestrictions'], 'Drafts')
+        self.assertEqual(provider['creationRestrictionsAreSuggestions'], '0')
+        self.assertEqual(provider['name'], 'luxpedia.articleTemplate')
+        self.assertEqual(wiki.object_data[other]['template'], 'OtherApp.Template')
+        self.assertNotIn(('LuxPedia/Templates', 'Article'), wiki.pages)
+        self.assertEqual(wiki.article_template, custom)
+        self.assertEqual(MESSAGES['en']['articleTemplate'], 'Article')
+        self.assertEqual(MESSAGES['zh']['articleTemplate'], '文章模板')
+
     def test_language_catalogs_match_and_default_is_english(self):
         self.assertEqual(MESSAGES['en'].keys(), MESSAGES['zh'].keys())
         wiki = FakeWiki()
@@ -402,6 +426,7 @@ class InterfaceConfigTest(unittest.TestCase):
             ('LuxPedia/Code', 'CategoryHomeTemplate'), ('LuxPedia/Code', 'InterfaceTranslations'),
             ('LuxPedia/Code', 'CategoryList'), ('LuxPedia/Code', 'ArticleList'),
             ('LuxPedia/Code', 'ArchiveList'), ('Knowledge/Archive', 'WebHome'),
+            ('LuxPedia/Templates', 'Article'), ('LuxPedia/Templates', 'ArticleProvider'),
             ('LuxPedia/Code', 'DraftList'), ('LuxPedia/Code', 'DraftTools'),
             ('LuxPedia', 'HelpPanel'), ('LuxPedia/Code', 'SourceEditUIX'), ('LuxPedia/Code', 'EditGuideUIX')}
         allowed |= {('XWiki', 'WebHome'), ('XWiki/Users', 'WebHome')}

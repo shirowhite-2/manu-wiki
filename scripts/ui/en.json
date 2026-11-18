@@ -153,5 +153,7 @@
   "archiveIntro": "Find archived encyclopedia articles here. Open an article to view it or ask an administrator to restore its visibility.",
   "archiveListHint": "Archived articles keep their original address and permissions. Existing documents stored in this category are also listed. Restoring an archived article shows its published version again.",
   "originalLocation": "Original location",
-  "archiveEmpty": "No archived articles or documents stored in this category."
+  "archiveEmpty": "No archived articles or documents stored in this category.",
+  "articleTemplate": "Article",
+  "articleTemplateDescription": "Start with sections for purpose, procedure, validation and references. Save and preview before submitting for review."
 }

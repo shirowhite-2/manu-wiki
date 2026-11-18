@@ -153,5 +153,7 @@
   "archiveIntro": "在这里查找已归档的百科文章。可打开文章查看，或由管理员恢复展示。",
   "archiveListHint": "已归档文章保留原地址和查看权限。本分类原有的资料也会列出。恢复展示后，文章的正式版会重新显示。",
   "originalLocation": "原位置",
-  "archiveEmpty": "暂无已归档文章或本分类收录的资料。"
+  "archiveEmpty": "暂无已归档文章或本分类收录的资料。",
+  "articleTemplate": "文章模板",
+  "articleTemplateDescription": "包含用途、操作步骤、验证和参考资料等章节。保存并预览后，再提交审核。"
 }

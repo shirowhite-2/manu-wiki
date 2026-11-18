@@ -223,7 +223,12 @@ def apply(module, wiki):
     # Update only the known system prefix in the trusted creation template.
     # User articles are converted during their own authenticated save by the policy.
     status, body = wiki.request('GET', wiki.page_path('LuxPedia/Templates', 'Article'))
-    if status == 200:
+    if status == 404:
+        wiki.ensure_page('LuxPedia/Templates', 'Article', 'Article template',
+                         (UI / 'pages/article_en.xwiki').read_text(), hidden=True)
+        ensure_translation(wiki, 'LuxPedia/Templates', 'Article', 'zh', '文章模板',
+                           (UI / 'pages/article_zh.xwiki').read_text())
+    elif status == 200:
         template = ET.fromstring(body)
         content = template.findtext('{http://www.xwiki.org}content') or ''
         legacy_body = (UI / 'pages/article_zh.xwiki').read_text()
@@ -234,6 +239,17 @@ def apply(module, wiki):
         elif content.startswith(module.ARTICLE_META):
             wiki.ensure_page('LuxPedia/Templates', 'Article', 'Article template',
                              content[len(module.ARTICLE_META):], hidden=True, update=True)
+    else:
+        raise RuntimeError(f'Could not inspect the article template: HTTP {status}')
+    # Both creation entries use the native chooser. Providers keep the standard
+    # article template available without passing a template that hides the chooser.
+    wiki.ensure_page('LuxPedia/Templates', 'ArticleProvider', 'Article template provider',
+                     'Native article template choice for the Drafts writing area.', hidden=True)
+    wiki.ensure_object_values('LuxPedia/Templates', 'ArticleProvider', 'XWiki.TemplateProviderClass', {
+        'name': 'luxpedia.articleTemplate', 'description': 'luxpedia.articleTemplateDescription',
+        'template': 'LuxPedia.Templates.Article', 'action': 'edit', 'terminal': '0',
+        'visibilityRestrictions': 'Drafts', 'creationRestrictions': 'Drafts',
+        'creationRestrictionsAreSuggestions': '0'})
     # These menu extensions render on every page and use XWiki's selected locale.
     for page, old, key, name, order in [
             ('SourceEditUIX', '源码编辑', 'sourceEdit', 'luxpedia.source.edit', 15000),
