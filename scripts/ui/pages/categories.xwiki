@@ -1,0 +1,21 @@
+#set($cats = $services.query.xwql("from doc.object(LuxPedia.Code.CategoryClass) as c where doc.name = 'WebHome' and doc.space like 'Knowledge.%' and doc.language = '' order by doc.title").execute())
+#set($visible = false)
+
+
+{{html clean="false"}}
+<table class="table table-striped luxpedia-system-list" style="width:100%;table-layout:fixed;overflow-wrap:anywhere">
+<thead><tr><th scope="col">#lp('categories')</th><th scope="col">#lp('description')</th></tr></thead>
+<tbody>
+#foreach($item in $cats)
+#set($category = $xwiki.getDocument($item))
+#if($category.hasAccessLevel('view'))
+#set($visible = true)
+<tr><td><a href="$escapetool.xml($xwiki.getURL($item))">$escapetool.xml($category.displayTitle)</a></td><td>$escapetool.xml($!category.getObject('LuxPedia.Code.CategoryClass').getValue('description'))</td></tr>
+#end
+#end
+#if(!$visible)
+<tr><td colspan="2">#lp('categoryEmpty')</td></tr>
+#end
+</tbody>
+</table>
+{{/html}}

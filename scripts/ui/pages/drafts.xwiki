@@ -1,0 +1,49 @@
+#set($articles = $services.query.xwql("where (doc.space = 'Drafts' or doc.space like 'Drafts.%') and doc.name <> 'WebPreferences' and doc.language = '' order by doc.date desc").execute())
+#set($visible = false)
+#set($draftView = "$!request.getParameter('draftView')")
+#set($actor = "$!xcontext.userReference")
+#set($isAdmin = $services.security.authorization.hasAccess('admin', $services.model.resolveDocument('XWiki.XWikiPreferences')))
+
+
+{{html clean="false"}}
+<table class="table table-striped luxpedia-system-list" style="width:100%;table-layout:fixed;overflow-wrap:anywhere">
+<thead><tr><th scope="col" style="width:5em">#lp('selectDraft')</th><th scope="col">#lp('title')</th><th scope="col">#lp('status')</th><th scope="col">#lp('destination')</th></tr></thead>
+<tbody>
+#foreach($item in $articles)
+#if($item != 'Drafts.WebHome')
+#set($draft = $xwiki.getDocument($item))
+#if($draft.hasAccessLevel('view'))
+#set($flow = $draft.getObject('PublicationWorkflow.PublicationWorkflowClass'))
+#set($state = 'unstarted')
+#if($flow)#set($state = $flow.getValue('status'))#end
+#set($workspace = $draft.getObject('LuxPedia.Code.DraftWorkspaceClass'))
+#set($abandoned = false)
+#if($workspace && $workspace.getValue('status') == 'abandoned')#set($abandoned = true)#end
+#set($mine = false)
+#if($workspace && $workspace.getValue('owner') == $actor)#set($mine = true)#end
+#if(!$workspace && $draft.creator == $xcontext.user)#set($mine = true)#end
+#set($show = false)
+#if($draftView == 'abandoned')
+#if($abandoned && ($mine || $isAdmin))#set($show = true)#end
+#elseif($draftView == 'mine')
+#if(!$abandoned && $mine)#set($show = true)#end
+#else
+#if(!$abandoned)#set($show = true)#end
+#end
+#if($state != 'published' && $state != 'archived' && $show)
+#set($visible = true)
+<tr><td>
+#if(!$abandoned && ($state == 'draft' || $state == 'unstarted') && ($isAdmin || ($mine && $workspace.getValue('shared') == '0')))
+<input type="checkbox" class="luxpedia-draft-select" aria-label="$escapetool.xml($draft.displayTitle)" data-reference="$escapetool.xml($item)" data-version="$escapetool.xml($draft.version)" />
+#end
+</td><td><a href="$escapetool.xml($xwiki.getURL($item))">$escapetool.xml($draft.displayTitle)</a></td><td>#if($abandoned)#lp('abandonedTitle')#else#lp($state)#end</td><td>#if($flow)$escapetool.xml($!flow.getValue('target'))#else#lp('destinationPending')#end</td></tr>
+#end
+#end
+#end
+#end
+#if(!$visible)
+<tr><td colspan="4">#lp('draftsEmpty')</td></tr>
+#end
+</tbody>
+</table>
+{{/html}}

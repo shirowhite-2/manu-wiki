@@ -1,0 +1,21 @@
+#set($articles = $services.query.xwql("from doc.object(PublicationWorkflow.PublicationWorkflowClass) as wf where wf.istarget = 0 and wf.status = 'validating' and (doc.space = 'Drafts' or doc.space like 'Drafts.%') and doc.language = '' order by doc.date asc").execute())
+#set($visible = false)
+
+
+{{html clean="false"}}
+<table class="table table-striped luxpedia-system-list" style="width:100%;table-layout:fixed;overflow-wrap:anywhere">
+<thead><tr><th scope="col">#lp('title')</th><th scope="col">#lp('status')</th><th scope="col">#lp('destination')</th></tr></thead>
+<tbody>
+#foreach($item in $articles)
+#set($draft = $xwiki.getDocument($item))
+#if($draft.hasAccessLevel('view'))
+#set($visible = true)
+<tr><td><a href="$escapetool.xml($xwiki.getURL($item))">$escapetool.xml($draft.displayTitle)</a></td><td>#lp('validating')</td><td>$escapetool.xml($!draft.getObject('PublicationWorkflow.PublicationWorkflowClass').getValue('target'))</td></tr>
+#end
+#end
+#if(!$visible)
+<tr><td colspan="3">#lp('queueEmpty')</td></tr>
+#end
+</tbody>
+</table>
+{{/html}}

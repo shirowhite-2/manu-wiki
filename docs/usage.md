@@ -8,25 +8,33 @@
 
 管理员用户名保存在本地 `.secrets/admin_username`，密码在 `.secrets/admin_password`；不要提交或分享这些文件。试点还提供 `poceditor`、`pocreviewer`、`pocreader` 三个合成测试账号，各自密码在 `.secrets/<用户名>_password`。正式邀请试点成员时应在 Administration → Users 中创建个人账号，避免多人共用管理员。
 
-| 角色 | 目标权限 |
-| --- | --- |
-| 管理员 | 用户、权限、扩展及整个实例配置 |
-| 编辑者 POCEditors | 阅读 Knowledge，在 Drafts 中编写和修改 |
-| 审核者 POCReviewers | 阅读/审核草稿，维护 Knowledge 已发布内容 |
-| 阅读者 POCReaders | 阅读 Knowledge 和附件，不读草稿、不编辑 |
-| 未登录用户 | 不读知识页面或附件；不开放自助注册 |
+Sprint 1 使用以下组；旧 POC 组不再作为验收依据。结构与权限矩阵见 [Sprint 1 实现与验收](sprint1.md)。
+
+| 角色 | 组 | 目标权限 |
+| --- | --- | --- |
+| 管理 | `XWiki.LuxManagers` | 用户、权限、扩展及整个实例配置 |
+| 编辑者 | `XWiki.LuxEditors` | 阅读 Knowledge，在 Drafts 中创建、修改和提交草稿 |
+| 审核人 | `XWiki.LuxReviewers` | 审核、拒绝或发布；工作流进入审核状态后可按流程获得该稿的审核权限 |
+| 读者 | `XWiki.LuxReaders` | 阅读 Knowledge 和附件、评论、收藏，不读草稿、不编辑 |
+| 未登录用户 | `XWiki.XWikiGuest` | 不读知识页面或附件；不开放自助注册 |
 
 权限在 wiki 和空间的 Administration → Rights 中管理。页面标题、标签、“Draft”状态都不能代替实际 VIEW 权限。新增子空间继承情况要用阅读者及匿名用户再测一次。
 
+`LuxPedia` 是产品帮助、模板、脚本和工作流配置空间：管理员可编辑；编辑者、审核人和读者只读。业务文章应在 `Drafts` 编辑，不要直接改 `LuxPedia` 内的配置页面。
+
 ## 知识结构与编辑
 
-- `Knowledge`：已发布示例，含 Technical、Operations 和 Attachments。
-- `Drafts`：草稿与审核区域，包含一篇带独立测试标记的合成草稿。
+- `Knowledge`：已发布示例，含 Technical、Operations、Faults、Archive、DocumentLibrary、CategoryGuide、CategoryIndex。
+- `Drafts`：草稿与审核区域。草稿首页可浏览，含“待审核队列”入口和内置文档列表宏；编辑者不能修改系统维护的首页，普通文章页面可编辑。
 - `Templates.Technical`：技术知识模板。可复制该页面到 Drafts，然后修改标题、负责人、适用版本、步骤、验证与来源。系统的 Templates 根空间也包含官方模板配置，不要整空间删除。
 
-打开页面 → Edit。CKEditor 可编辑标题、正文、列表、表格、链接和图片；等待协作编辑工具栏就绪，点击 `Done` 完成保存，再以阅读者打开检查；本版本的旧 `Save & View` 控件可能被协作工具栏替代。需要源代码时选择 Wiki 编辑模式，页面语法为 XWiki 2.1。不要把 Markdown 代码原样当作 XWiki 语法。
+打开草稿页面 → Edit。默认使用 CKEditor，可编辑标题、正文、列表、表格、链接和图片。编辑者的协作编辑按钮显示为 **保存并提交审核**：保存后自动进入“待审核”状态；管理员仍使用普通 **Done / Save**。待审列表入口在 Drafts 首页的“待审核队列”，审核人也可通过右侧 Workflow 面板发布或退回。源码编辑模式使用其原有保存按钮；要自动提交审核，请使用 CKEditor 的“保存并提交审核”。不要把 Markdown 代码原样当作 XWiki 语法。
+
+新草稿的编辑器上方有“审核通过后发布到分类”选择器，默认使用文章主分类；可在提交前改选目标分类。点击 **保存并提交审核** 后，分类元数据和发布目标会一起更新。修改已发布文章时，从该 Knowledge 文章右侧的 **Workflow → 打开修改草稿** 进入关联草稿；这类草稿的目标锁定为原文章位置，选择器会说明目标并禁止改址。审核人在“待审核队列”或草稿页 Workflow 面板中发布或退回。
 
 分类可通过嵌套页面和 Tags 实现；少量示例使用技术文档、操作手册两类，不复制 BWIpedia 全量内容。中文页面内容可直接编写，界面语言在用户配置或 Localization 中选择。
+
+匿名用户不能创建、编辑、评论、删除或注册；只保留登录页和公开首页。需要操作时先用个人账号登录，不要共用管理员。
 
 ## 附件与版本
 

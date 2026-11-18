@@ -1,0 +1,34 @@
+#set($articles = $services.query.xwql("from doc.object(PublicationWorkflow.PublicationWorkflowClass) as wf where wf.istarget = 1 and (doc.space = 'Knowledge' or doc.space like 'Knowledge.%') and doc.name <> 'WebPreferences' and doc.fullName not in ('Knowledge.WebHome', 'Knowledge.CategoryIndex', 'Knowledge.CategoryGuide', 'Knowledge.CategoryAdmin', 'Knowledge.DocumentLibrary', 'Knowledge.Archive.WebHome') and doc.language = '' order by doc.date desc").addFilter('unique').execute())
+#set($visible = false)
+
+
+{{html clean="false"}}
+<p><a href="$escapetool.xml($xwiki.getURL('Knowledge.Archive.WebHome'))">#lp('archiveCenter')</a></p>
+<table class="table table-striped luxpedia-system-list" style="width:100%;table-layout:fixed;overflow-wrap:anywhere">
+<thead><tr><th scope="col">#lp('title')</th><th scope="col">#lp('status')</th><th scope="col">#lp('owner')</th><th scope="col">#lp('tags')</th></tr></thead>
+<tbody>
+#foreach($item in $articles)
+#set($article = $xwiki.getDocument($item))
+#if($article.hasAccessLevel('view'))
+#set($metadata = $article.getObject('LuxPedia.Code.ArticleClass'))
+#set($flow = $article.getObject('PublicationWorkflow.PublicationWorkflowClass'))
+#set($state = 'published')
+#if($flow)#set($state = $flow.getValue('status'))#end
+#if($state != 'archived' && !$article.getObject('LuxPedia.Code.CategoryClass'))
+#set($visible = true)
+#set($owner = '')
+#set($tags = '')
+#if($metadata)
+#set($owner = "$!metadata.getValue('owner')")
+#set($tags = "$!metadata.getValue('tagsText')")
+#end
+<tr><td><a href="$escapetool.xml($xwiki.getURL($item))">$escapetool.xml($article.displayTitle)</a></td><td>#lp($state)</td><td>$escapetool.xml($owner)</td><td>$escapetool.xml($tags)</td></tr>
+#end
+#end
+#end
+#if(!$visible)
+<tr><td colspan="4">#lp('empty')</td></tr>
+#end
+</tbody>
+</table>
+{{/html}}

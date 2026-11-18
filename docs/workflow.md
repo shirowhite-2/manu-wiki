@@ -1,5 +1,7 @@
 # Publication Workflow 现成扩展核对与 POC 操作说明
 
+> 当前分支新增了保存前的服务端角色校验和默认英文/可切换中文的界面，部署顺序、权限矩阵和旧稿迁移见[角色与界面说明](roles-and-interface.md)。以下上游扩展说明和实例记录保留作历史参考；运行 Python 应用脚本前，必须先安装 `workflow-policy` 组件。新增策略尚未在真实实例重新验收。
+
 核对日期：2026-11-12。目标环境：XWiki 17.10.15 LTS。
 
 **状态：2.4.9已安装到XWiki17.10.15；两角色的起草→提交审核→审核者发布流程已在实例实测通过。完整三角色、通知、目录树和附件同步等仍待验收，详见文末。**
@@ -31,7 +33,7 @@
 
 官方用法见[扩展使用说明](https://extensions.xwiki.org/xwiki/bin/view/Extension/XWiki%20Publication%20Workflow%20Application#HUsage)。配置字段及默认值见[2.4.9 配置类](https://github.com/xwiki-contrib/workflow-publication/blob/xwiki-workflow-publication-2.4.9/xwiki-workflow-publication-application/src/main/resources/PublicationWorkflow/PublicationWorkflowConfigClass.xml)。
 
-建议首轮保持 `Set drafts to hidden = Yes`、`Skip draft rights = No`、`Move strategy = Do nothing`，默认目标设为发布区域。`hidden` 只是隐藏页面的展示标记，草稿保密须靠查看权限。可选 viewer/commenter 组先留空；需要额外旁观或评论角色时再单独验收。
+通用部署可用 `Set drafts to hidden = Yes` 减少草稿在普通页面索引中的显示，但它不是访问控制。本实例为让审核队列列出待审页面设置为 `draftsHidden = 0`；草稿内容仍由 Drafts 空间的 VIEW ACL 保护。两角色配置保持 `Skip draft rights = No`、`Move strategy = Do nothing`，viewer/commenter 组为空。
 
 若只需要一次审核，可不设置 moderator，由 publisher 承担审核与发布。三组方案则便于演示作者、审核、批准发布三个职责，但扩展没有强制同一人不得兼任。
 
@@ -76,20 +78,66 @@ published → Edit draft → draft（旧发布页保留）
 
 ## 当前实例验收记录
 
-实际执行日期：2026-11-12。配置页 `PublicationWorkflow.POC`：contributor=`XWiki.POCEditors`，moderator为空，validator=`XWiki.POCReviewers`，`draftsHidden=1`，`skipDraftRights=0`。因此作者提交后直接进入validating，由审核者批准发布。草稿 `Drafts.WorkflowDemo.WebHome`，发布目标 `Knowledge.WorkflowDemo.WebHome`，不包含子页。
+当前实例更新日期：2026-11-17。旧的 `PublicationWorkflow.POC` / `Drafts.WorkflowDemo` 记录来自早期 POC，当前实例不存在；以本节配置为准。
+
+当前配置页为 `LuxPedia.Workflow.Config`：
+
+| 字段 | 当前值 |
+| --- | --- |
+| contributor | `XWiki.LuxEditors` |
+| moderator | 空（两角色） |
+| validator | `XWiki.LuxReviewers` |
+| defaultDraftSpace | `Drafts` |
+| defaultTargetSpace | `Knowledge` |
+| draftsHidden | `0`（审核列表可列出待审核稿；Drafts 仍由 VIEW 权限保护） |
+| skipDraftRights | `0` |
+| moveStrategy | `doNothing` |
+
+管理员可用 `python3 scripts/apply_workflow.py --apply` 幂等恢复配置、Drafts/Knowledge 工作流面板、编辑者/审核人草稿权限，以及现有文章的工作流关联。默认不写入，需显式传 `--apply`。
+
+### 用户操作
+
+1. **新建文章**：在 Drafts 创建文章；编辑者在 CKEditor 上方选择“审核通过后发布到分类”（默认文章主分类），然后点 **保存并提交审核**。系统保存分类元数据、自动开始工作流并提交审核，不需要展开高级选项或手填发布位置。
+2. **修改已发布文章**：在 Knowledge 的原文章页面打开右侧 Workflow 面板，点击 **Go to draft**。系统打开与原发布页关联的草稿；编辑者修改后点 **保存并提交审核**，目标位置保持原样。审核人发布后更新原 Knowledge 页面。
+3. **审核与发布**：编辑者提交后状态为 `validating`。审核人可在 Workflow 面板执行 Publish 或 Refuse。
+4. **审核队列**：从 `Drafts.WebHome` 点击 **待审核队列**，或从 **帮助中心 → Workflow → 审核队列** 进入（`LuxPedia.Workflow.ReviewQueue`）；列表显示 validating 状态的待审文章。待审状态显示为“待审核，尚未发布”，避免误认为已经通过。
+5. **管理员**：编辑器仍保留普通 **Done / Save**，不会自动提交审核。
+
+目前的 `Knowledge` 中 ArticleClass 页面会登记为工作流发布目标；已有同分类、同名 Drafts 页面会自动关联到原目标。其余历史文章从 Knowledge 点击 Go to draft 时，会在 Drafts 创建关联草稿。Drafts 页面不再依赖 hidden 标记隐藏；读者和匿名用户仍被空间 VIEW ACL 拒绝，因此页面列表只对有权限的编辑者/审核人可见。`Drafts.WebHome` 使用内置 Documents 宏列出文章并提供待审核队列入口；编辑者可浏览但不能编辑该系统维护页，普通草稿页面不受此限制。
+
+实现脚本 `scripts/apply_workflow.py` 把配置和界面行为写入 XWiki。`LuxPedia.Code.WorkflowUXScript` 通过 JavaScriptExtension：编辑者的 Done 改为“保存并提交审核”；保存完成后驱动工作流开始/提交；管理员保持原生按钮。XWiki 数据库存放工作流对象和页面状态，脚本用于在其他实例复现设置。
+
+### 新建草稿选择分类后未进入队列的修复
+
+普通 XWiki 页面保存为 `Drafts.文章名.WebHome`。旧代码选择分类时把最后的 `WebHome` 当作文章名，生成 `Knowledge.Technical.WebHome` 一类目标，和已有分类首页冲突。上游工作流返回 `targetexists=true`，因此没有创建工作流对象，也不会进入待审核列表。
+
+现在普通页面使用倒数第二段作为文章名，发布目标为分类下的终端文章页。例如 `Drafts.新文章.WebHome` 选择“技术文档”后，目标为 `Knowledge.Technical.新文章`；终端草稿 `Drafts.新文章` 使用相同规则。单篇文章的快捷提交不包含子页。草稿仍保留在 Drafts，先进入 `validating` 队列；审核人发布后，扩展才在所选分类生成目标副本。已有工作流的文章保留原目标。真实的同名冲突会提示“已保存但未提交审核”，并停止自动重试。
+
+修复脚本后，需在目标实例以管理员配置运行 `python3 scripts/apply_workflow.py --apply`，更新数据库中的 JavaScriptExtension；仅更新仓库文件不会改变已部署实例。部署后重新加载编辑器页面，以免继续使用浏览器缓存的旧脚本。之前尚无工作流对象的草稿可以重新编辑、选择分类并提交；已关联到错误目标的草稿需要管理员单独检查，脚本不会自动重定向已有工作流。
+
+离线浏览器回归测试：安装 Node.js、Python 3、Playwright 和 Chromium 后运行 `node --test tests/workflow_ux.test.cjs`。使用系统 Chromium 时可设置 `CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium`。测试使用本地 HTTP 服务模拟上游表单、REST 和重定向，覆盖普通页、终端页、分类元数据、根目录选择、原目标保留、同名冲突和管理员保存。它验证脚本的浏览器行为，不代替真实 XWiki 的审核发布验收。
+
+### 既有实例验收记录
+
+以下为原有的 2026-11-17 浏览器端到端验收记录，不包含上述修复在真实实例上的重新验收：
+
+- 新建测试草稿：编辑者点击“保存并提交审核”后自动进入 `validating`，默认目标按 `ArticleClass.primaryCategory` 指向 `Knowledge.Technical`；审核人发布后生成 Knowledge 页面。
+- 已发布测试文章：编辑者从 Knowledge 的 Go to draft 进入 Drafts 关联草稿；保存并提交后目标仍为原 `Knowledge.Technical` 页面，审核人发布后更新原页面。
+- 管理员仍显示原生 Done；编辑者可编辑普通 Drafts 页面，不能直接编辑 Knowledge；读者仍不能访问 Drafts。
+- 两个测试页面已清理；Sprint 1 冒烟测试 14 项通过。
+
+邮件通知未验收，当前环境未配置 SMTP；通知失败不影响页面内的提交和发布状态流转。严格职责分离仍未完成：审核人对 Knowledge 的权限需另行审计，不能仅凭此 POC 声称无法绕过流程。
 
 | 验收项 | 预期 | 当前结果 |
 | --- | --- | --- |
-| 安装 | 应用及依赖在 17.10.15 成功安装，版本为 2.4.9 | 已通过官方扩展管理器安装 |
-| 作者起草 | 作者能建草稿、提交审核；无发布权限 | poceditor启动流程并提交，进入validating；作者界面无发布操作，未完整测试伪造请求 |
-| 审核 | 审核员能编辑审核稿、退回作者或提交审批 | 本轮审核和批准发布合并为POCReviewers；拒绝/独立moderator未测 |
-| 批准发布 | 发布员能批准、拒绝并发布到指定目标 | pocreviewer点击Publish并确认，产生目标1.1，记录作者pocreviewer；拒绝路径未测 |
-| 读者隔离 | 普通读者看到发布版，无法查看草稿 | pocreader可见发布标记，直接读工作流草稿HTTP403 |
-| 防绕过流程 | 各普通业务账号不能直接编辑发布目标 | 阅读者编辑403；审核组仍有Knowledge编辑权，未实现强制四眼审核 |
-| 旧版保留 | 新草稿审核期间，读者仍看到旧发布版 | 未实际验收 |
-| 附件及历史 | 发布后附件可用；目标新增修订，草稿历史仍在草稿页 | 未实际验收 |
-| ACL 保留 | 再次发布不覆盖发布区权限 | 未实际验收 |
-| 通知 | SMTP 配好后，审核、审批和拒绝等邮件到达预期收件人 | 未实际验收 |
-| 可选目录树 | includeChildren 的复制、删除与权限继承符合预期 | 未实际验收 |
+| 安装 | XWiki 17.10.15 安装 Publication Workflow 2.4.9 | 通过 |
+| 编辑者提交 | 编辑者保存后进入 validating | 浏览器端到端通过；无需手选目标位置 |
+| 已发布文章修改 | 从原 Knowledge 文章进入关联草稿，发布后位置不变 | 临时既有文章端到端通过；目标保留原 Knowledge 分类路径 |
+| 审核发布 | 审核人可发布到目标页 | 通过；页面内 Publish/确认生成或更新目标页 |
+| 角色权限 | 编辑者不能直接编辑 Knowledge，读者不能查看 Drafts | 冒烟测试通过；审核人在工作流状态中按扩展授予审核权限 |
+| 管理员保存 | 管理员继续使用普通 Done / Save | 浏览器检查通过 |
+| 旧版保留与 ACL | 审核期间旧版仍可读，发布不覆盖目标 ACL | 尚未专项验收 |
+| 邮件通知 | SMTP 配置后邮件送达 | 未验收；当前没有 SMTP |
+| 可选目录树 | includeChildren 复制/删除/权限继承 | 未验收 |
 
 邮件到达依赖 SMTP 和测试用户邮箱，不能以界面提交成功代替送达结果。上游还提供了[人工测试场景](https://github.com/xwiki-contrib/workflow-publication/blob/xwiki-workflow-publication-2.4.9/tests.md)，可作为后续回归清单参考。

@@ -2,11 +2,11 @@
 
 基于 [h3mxxx/manu-wiki](https://github.com/h3mxxx/manu-wiki) 空仓库建立。优先官方、开源、免费组件；不采购、不操作生产、不迁移 BWIpedia 全量数据。
 
-当前隔离环境已安装 **XWiki Standard 17.10.15 LTS + PostgreSQL 16.15 + Publication Workflow 2.4.9**，配置示例知识、账号权限及模板。AI 与 Office 后续方案已整理；根据用户最新选择，先完成核心 Wiki，不部署模型。
+当前隔离环境已安装 **XWiki Standard 17.10.15 LTS + PostgreSQL 16.15 + Publication Workflow 2.4.9**，配置示例知识、账号权限及模板。Sprint 1 已建立管理/编辑者/审核人/读者四类角色、主分类空间、文章元数据类、分类首页和图片/视频/图表示例；详见 [Sprint 1 实现与验收](docs/sprint1.md)。AI、Office 在线编辑、审批 UI、文件引用与审计仍未实现。
 
 用户界面采用 **LuxPedia** 品牌，仓库仍名为 `manu-wiki`。品牌配置使用官方主题和 Skin 机制，详见[应用及回退说明](docs/branding.md)。新部署不会自动应用实例中的品牌与首页。
 
-访问地址：`http://127.0.0.1:8080/`，**仅在当前云环境内可达**，不是用户电脑的 localhost，也没有公网/企业长期入口。当前共享 Desktop 浏览器工具不可用，已用环境内 Chromium 完成实际浏览器验收。管理员账号和密码保存在本地 `.secrets/admin_username`、`.secrets/admin_password`；不要提交到 Git。
+访问地址：`http://127.0.0.1:8080/`，**仅在当前云环境内可达**，不是用户电脑的 localhost，也没有公网/企业长期入口。若宿主 8080 被占用，可在本地 `.env` 中设置 `XWIKI_PORT=8081`；本次 Sprint 1 验证使用 8081。当前共享 Desktop 浏览器工具不可用，已用环境内 Chromium 完成实际浏览器验收。管理员账号和密码保存在本地 `.secrets/admin_username`、`.secrets/admin_password`；不要提交到 Git。
 
 ## 启动
 
@@ -26,6 +26,7 @@ docker compose ps
 export COMPOSE_FILE=compose.yaml:compose.cloud.yaml
 docker compose up -d
 python3 tests/smoke.py
+python3 tests/sprint1_smoke.py
 ./scripts/backup.sh
 ```
 
@@ -33,6 +34,9 @@ python3 tests/smoke.py
 
 ## 交付与记录
 
+- [当前角色、百科/编写区流程与部署](docs/roles-and-interface.md)
+- [Word、视频与大批量资料迁入](docs/bulk-import.md)（含只读目录盘点、CSV 分批和存储规划）
+- [Sprint 1 角色、分类与文章结构](docs/sprint1.md)
 - [部署、启动、备份和恢复](docs/deployment.md)
 - [账号、权限、编辑、附件和模板](docs/usage.md)
 - [Publication Workflow 配置与实际记录](docs/workflow.md)
@@ -44,6 +48,6 @@ python3 tests/smoke.py
 - [基础版本运行测试](reports/baseline-test-2026-11-12.md) · [变更记录](CHANGELOG.md) · [版本发布流程](docs/releasing.md)
 - [LuxPedia 品牌配置](docs/branding.md) · [品牌验收](reports/branding-acceptance.md)
 
-`tests/smoke.py` 是针对本实例合成数据的只读检查，需要本地测试账号密码文件；它不创建账号，也不能代替人工浏览器验收。真实模型问答、语义检索、AI 权限隔离和 Office 保存回写均未验收。
+`tests/smoke.py` 是针对旧版合成数据的只读检查；Sprint 1 结构使用 `tests/sprint1_smoke.py`。两者都需要本地测试账号密码文件，不创建账号，也不能代替人工浏览器验收。真实模型问答、语义检索、AI 权限隔离和 Office 保存回写均未验收。
 
 ![LuxPedia 首页](reports/screenshots/luxpedia-home.png)

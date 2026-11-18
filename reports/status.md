@@ -1,6 +1,16 @@
 # 阶段报告与问题清单
 
-更新日期：2026-11-12。以实际验收记录为准。
+更新日期：2026-11-17。以实际验收记录为准。
+
+Sprint 1（2026-11-16）：已建立 `XWiki.LuxManagers`、`LuxEditors`、`LuxReviewers`、`LuxReaders` 四类角色，Knowledge 主分类空间、ArticleClass/CategoryClass、分类首页、文档库和示例文章；安装 CKEditor、Chart.js、Embed、Favorites、Publication Workflow。已验证权限矩阵、源码编辑、图片/视频/图表渲染、附件字节、历史与回滚，`tests/sprint1_smoke.py` 14 项通过。审批 UI、文件引用/删除保护、统一审计、Draw.io 和 Excel 在线编辑仍未实现。详见 [Sprint 1](../docs/sprint1.md)。本地验证使用 127.0.0.1:8081，因宿主 8080 被其他容器占用；默认部署仍为 8080。
+
+工作流与编辑体验（2026-11-17）：配置两角色 Publication Workflow（编辑者提交、审核人发布）；编辑者在 Drafts 使用“保存并提交审核”，目标按文章主分类自动选取，管理员仍使用普通 Done/Save。Knowledge 既有 ArticleClass 文章已登记为工作流目标；从 Knowledge 的 Go to draft 编辑时保留原位置。修复 Drafts 权限并将首页 Velocity 查询换成内置 Documents 宏，首页可浏览且不会因最后作者变化报脚本权限错误。浏览器端到端测试覆盖新建草稿与既有文章更新；临时测试页面已删除，`tests/sprint1_smoke.py` 14 项通过。SMTP 邮件通知仍未配置；审核组对 Knowledge 的编辑权限仍需进一步审计。详见 [工作流使用与验收](../docs/workflow.md)。
+
+审核可见性修复（2026-11-17）：将工作流 `draftsHidden` 设为 0，让待审稿进入 Workflow Overview 列表；草稿访问仍由空间 ACL 控制，读者/匿名仍被拒绝。Drafts 首页新增“待审核队列”入口；待审状态在面板中显示为“待审核，尚未发布”。验证审核账号在 `PublicationWorkflow.Overview` 看见 `Drafts.test.WebHome`，并能看到 Publish/退回操作；该测试稿随后已发布，目前不在待审队列。
+
+权限与分类选择（2026-11-17）：`LuxPedia` 根空间现在仅管理员可编辑，编辑者/审核人/读者只读。新草稿编辑器提供“审核通过后发布到分类”选择器，默认文章主分类；已关联的既有文章显示锁定目标。验证编辑者改选 Faults 后 ArticleClass 元数据同步为“故障处理”，并自动提交到 `Knowledge.Faults`；管理员仍保留原生保存按钮。详见 [工作流使用与验收](../docs/workflow.md)。
+
+测试数据变更（2026-11-17）：审核人曾发布 `Drafts.SampleArticle`，使 `Knowledge.Technical.SampleArticle` 成为新版本且标题变为“示例草稿”。因此 `tests/sprint1_smoke.py` 中针对旧标题和“编辑者可直接编辑 Drafts.SampleArticle”的固定断言已过时；工作流页面状态和实际权限以当前实例为准。
 
 品牌更新：用户选择 LuxPedia，已应用独立主题、Logo/图标、站内帮助及首页文案，清理普通导航推广入口。品牌与权限复验见[品牌验收](branding-acceptance.md)，组件与阶段范围不变。
 
