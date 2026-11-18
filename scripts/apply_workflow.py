@@ -594,7 +594,6 @@ def load_apply_module():
 
 # Right-column workflow panel, shown only in Drafts (space preference object).
 PANEL_VALUES = {"rightPanels": "PublicationWorkflow.PublicationWorkflowPanel"}
-REVIEW_QUEUE_LINK = "* [[待审核队列>>PublicationWorkflow.Overview]]\n"
 LUXPEDIA_VIEW_ROLES = ("XWiki.LuxEditors", "XWiki.LuxReviewers", "XWiki.LuxReaders")
 # The writing-area home is editable content; its list/toolbar code lives in protected renderer pages.
 def read_page(wiki, space, page):

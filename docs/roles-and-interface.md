@@ -86,6 +86,14 @@ python3 scripts/apply_workflow.py --base-url http://127.0.0.1:8081 --apply
 
 Maven 缓存卷只用于保留下载依赖。`--wait` 等待 XWiki 健康检查通过后再应用配置；完成后强制刷新浏览器。实际实例仍须验证保存预览、附件/媒体、撤回恢复编辑、发布后隐藏和再次修改的完整链路。
 
+## 统一审核入口
+
+审核入口统一为 **帮助中心 → Workflow → Review queue / 审核队列**，对应 `LuxPedia.Workflow.ReviewQueue`。主页、草稿工具和文章侧栏均链接到这个队列。新增 `LuxPedia.Workflow.WebHome` 作为帮助中心下的工作流入口，并提供中英文标题。
+
+原生导航排除 `PublicationWorkflow.WebHome`，Applications 菜单中仅禁用 `platform.panels.workflowApplication` 这一个导航扩展。旧 `PublicationWorkflow.WebHome` 和 `PublicationWorkflow.Overview` 保留为跳转页，旧地址不再显示独立列表或旧批量审批表单。审批扩展的类、动作脚本、面板、翻译和配置仍然保留；删除整个技术空间会破坏草稿和审批流程。
+
+这项入口调整无需更新 Java 组件。已经安装策略 5 的实例只需拉取分支，再执行完整的 `apply_workflow.py --apply` 并刷新浏览器；尚未完成上次策略 5 更新的实例仍须使用上方完整构建命令。
+
 ## 管理入口和用户目录
 
 左侧导航通过原生 NavigationConfiguration 排除原始 `XWiki` 空间树，保留其他排除设置及现有面板内容。管理员在同一导航面板中看到 `XWiki administration → Users` 及管理员、编辑者、审核者、读者、未分配角色入口。普通用户看不到该管理入口；首页、角色目录和服务端查询同时校验 Wiki 级 admin 权限，直接访问地址也不能读取目录。面板禁用跨用户缓存，避免把管理员链接展示给其他账号。

@@ -26,7 +26,11 @@ BRAND_FOOTER = 'LuxPedia · $services.localization.render(\'luxpedia.brandTaglin
 CATEGORY_LIST = (UI / 'pages/categories.xwiki').read_text()
 ARTICLE_LIST = (UI / 'pages/articles.xwiki').read_text()
 REVIEW_LIST = (UI / 'pages/review_queue.xwiki').read_text()
+LEGACY_REVIEW_REDIRECT = """{{velocity}}
+#set($discard = $response.sendRedirect($xwiki.getURL('LuxPedia.Workflow.ReviewQueue')))
+{{/velocity}}"""
 PAGES = {
+    ("LuxPedia/Workflow", "WebHome"): ("workflowCenter", V + "= #lp('workflowCenter') =\n\n[[#lp('queue')>>LuxPedia.Workflow.ReviewQueue]]\n" + END),
     ("LuxPedia/Workflow", "ReviewQueue"): ("queue", V + "= #lp('queue') =\n\n#lp('nextReview')\n\n" + REVIEW_LIST + END),
     ("Main", "WebHome"): ("home", V + '''= #lp('home') =
 
@@ -34,7 +38,7 @@ PAGES = {
 
 * [[#lp('knowledge')>>Knowledge.WebHome]]
 * [[#lp('drafts')>>Drafts.WebHome]]
-* [[#lp('queue')>>PublicationWorkflow.Overview]]
+* [[#lp('queue')>>LuxPedia.Workflow.ReviewQueue]]
 * [[#lp('library')>>Knowledge.DocumentLibrary]]
 * [[#lp('categories')>>Knowledge.CategoryIndex]]
 * [[#lp('editGuide')>>LuxPedia.Help.EditGuide]]
@@ -47,7 +51,7 @@ PAGES = {
     ("LuxPedia/Help", "EditGuide"): ("editGuide", V + "= #lp('editGuide') =\n\n#lp('guideContent')\n" + END),
     ("LuxPedia/Help", "WebHome"): ("help", V + "= #lp('help') =\n\n#lp('guideContent')\n" + END),
     ("LuxPedia/About", "WebHome"): ("about", V + "= #lp('about') =\n\n#lp('aboutContent')\n" + END),
-    ("LuxPedia", "WebHome"): ("helpCenter", V + "= #lp('helpCenter') =\n\n[[#lp('help')>>LuxPedia.Help.WebHome]] · [[#lp('about')>>LuxPedia.About.WebHome]]\n" + END),
+    ("LuxPedia", "WebHome"): ("helpCenter", V + "= #lp('helpCenter') =\n\n[[#lp('workflowCenter')>>LuxPedia.Workflow.WebHome]] · [[#lp('help')>>LuxPedia.Help.WebHome]] · [[#lp('about')>>LuxPedia.About.WebHome]]\n" + END),
 }
 
 
@@ -150,9 +154,20 @@ def apply(module, wiki):
         if (space, page) in EDITABLE_PAGES:
             ensure_editable_page(wiki, space, page)
             continue
-        content = content.replace('PublicationWorkflow.Overview', 'LuxPedia.Workflow.ReviewQueue')
         wiki.ensure_page(space, page, MESSAGES['en'][key], content, update=True)
         ensure_translation(wiki, space, page, 'zh', MESSAGES['zh'][key], content)
+    # Keep old bookmarks functional without a second queue or the old bulk actions.
+    for page in ('WebHome', 'Overview'):
+        wiki.ensure_page('PublicationWorkflow', page, MESSAGES['en']['queue'], LEGACY_REVIEW_REDIRECT,
+                         hidden=True, update=True)
+        ensure_translation(wiki, 'PublicationWorkflow', page, 'zh', MESSAGES['zh']['queue'], LEGACY_REVIEW_REDIRECT)
+    # Disable only the upstream navigation UIX, retaining workflow classes, script
+    # actions, panel, translations and configuration required for native approval.
+    for number in wiki.objects('PublicationWorkflow', 'ApplicationsPanelEntry', 'XWiki.UIExtensionClass'):
+        values = wiki.object_values('PublicationWorkflow', 'ApplicationsPanelEntry', 'XWiki.UIExtensionClass', number)
+        if values.get('name') == 'platform.panels.workflowApplication' and values.get('extensionPointId'):
+            wiki.set_object_property('PublicationWorkflow', 'ApplicationsPanelEntry', 'XWiki.UIExtensionClass',
+                                     number, 'extensionPointId', '')
     # Preserve the category-creation implementation while localizing its UI strings.
     content = module.CATEGORY_ADMIN
     replacements = {
@@ -197,7 +212,7 @@ def apply(module, wiki):
     wiki.ensure_page('LuxPedia', 'HelpPanel', 'LuxPedia help', '', hidden=True)
     wiki.ensure_object_values('LuxPedia', 'HelpPanel', 'Panels.PanelClass', {
         'name': 'LuxPedia help', 'type': 'view', 'category': 'Information',
-        'content': V + '#panelheader("LuxPedia")\n* [[#lp(\'help\')>>LuxPedia.Help.WebHome]]\n* [[#lp(\'about\')>>LuxPedia.About.WebHome]]\n#panelfooter()' + END,
+        'content': V + '#panelheader("LuxPedia")\n* [[#lp(\'workflowCenter\')>>LuxPedia.Workflow.WebHome]]\n* [[#lp(\'help\')>>LuxPedia.Help.WebHome]]\n* [[#lp(\'about\')>>LuxPedia.About.WebHome]]\n#panelfooter()' + END,
         'async_cached': '0', 'async_enabled': '0'})
     if wiki.page_exists('FlamingoThemes', 'LuxPedia'):
         wiki.ensure_object_values('FlamingoThemes', 'LuxPedia', 'FlamingoThemesCode.ThemeClass', {'logo-description': 'LuxPedia knowledge base'})

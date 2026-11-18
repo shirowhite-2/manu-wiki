@@ -54,6 +54,9 @@ class FakeWiki:
         self.objects_written.append((space, page, class_name, values))
         self.object_data.setdefault((space, page, class_name), {}).update(values)
 
+    def set_object_property(self, space, page, class_name, number, name, value):
+        self.object_data[(space, page, class_name)][name] = value
+
     def ensure_right(self, space, page, values):
         self.rights.append((space, page, values))
 
@@ -250,7 +253,7 @@ class InterfaceConfigTest(unittest.TestCase):
         directory.apply(Module, wiki)
         directory.apply(Module, wiki)
         config = wiki.object_data[('PanelsCode', 'NavigationConfiguration', cls)]
-        self.assertEqual(config['exclusions'], 'Sandbox.WebHome|Help With Spaces.WebHome|XWiki.WebHome')
+        self.assertEqual(config['exclusions'], 'Sandbox.WebHome|Help With Spaces.WebHome|XWiki.WebHome|PublicationWorkflow.WebHome')
         self.assertEqual(config['inclusions'], 'Knowledge.WebHome')
         panel = wiki.object_data[('Panels', 'Navigation', 'Panels.PanelClass')]
         self.assertEqual(panel['content'].count('LUXPEDIA_ADMIN_DIRECTORY_START'), 1)
@@ -272,6 +275,36 @@ class InterfaceConfigTest(unittest.TestCase):
         translated = [data for method, path, data in wiki.requests if method == 'PUT' and '/spaces/Editors/' in path]
         self.assertTrue(any('编辑者' in body for body in translated))
 
+    def test_review_navigation_has_one_queue_and_disables_only_legacy_application_entry(self):
+        wiki = FakeWiki()
+        native = ('PublicationWorkflow', 'ApplicationsPanelEntry', 'XWiki.UIExtensionClass')
+        wiki.object_data[native] = {
+            'name': 'platform.panels.workflowApplication',
+            'extensionPointId': 'org.xwiki.platform.panels.Applications',
+            'parameters': 'target=PublicationWorkflow.WebHome'}
+        unrelated = ('OtherApp', 'Entry', 'XWiki.UIExtensionClass')
+        wiki.object_data[unrelated] = {'name': 'other.app', 'extensionPointId': 'org.xwiki.platform.panels.Applications'}
+        native_panel = ('PublicationWorkflow', 'PublicationWorkflowPanel', 'Panels.PanelClass')
+        wiki.object_data[native_panel] = {'content': 'Native approval and publication actions'}
+        interface.apply(Module, wiki)
+        interface.apply(Module, wiki)
+        self.assertEqual(wiki.object_data[native]['extensionPointId'], '')
+        self.assertEqual(wiki.object_data[native]['parameters'], 'target=PublicationWorkflow.WebHome')
+        self.assertEqual(wiki.object_data[unrelated]['extensionPointId'], 'org.xwiki.platform.panels.Applications')
+        self.assertEqual(wiki.object_data[native_panel]['content'], 'Native approval and publication actions')
+        self.assertIn('>>LuxPedia.Workflow.WebHome', wiki.pages[('LuxPedia', 'WebHome')][1])
+        self.assertIn('>>LuxPedia.Workflow.ReviewQueue', wiki.pages[('LuxPedia/Workflow', 'WebHome')][1])
+        self.assertIn('>>LuxPedia.Workflow.ReviewQueue', wiki.pages[('Main', 'WebHome')][1])
+        self.assertNotIn('PublicationWorkflow.Overview', str(wiki.pages))
+        for page in ('WebHome', 'Overview'):
+            body = wiki.pages[('PublicationWorkflow', page)][1]
+            self.assertIn("sendRedirect($xwiki.getURL('LuxPedia.Workflow.ReviewQueue'))", body)
+            self.assertNotIn('publishAll', body)
+            self.assertNotIn('$request', body)
+        self.assertFalse(any(method == 'DELETE' for method, path, data in wiki.requests))
+        self.assertEqual(MESSAGES['en']['workflowCenter'], 'Workflow')
+        self.assertEqual(MESSAGES['zh']['workflowCenter'], '工作流')
+
     def test_language_catalogs_match_and_default_is_english(self):
         self.assertEqual(MESSAGES['en'].keys(), MESSAGES['zh'].keys())
         wiki = FakeWiki()
@@ -283,7 +316,8 @@ class InterfaceConfigTest(unittest.TestCase):
     def test_translation_and_system_pages_do_not_rewrite_articles(self):
         wiki = FakeWiki()
         interface.apply(Module, wiki)
-        allowed = set(interface.PAGES) | {('PublicationWorkflow', 'Translations'), ('Knowledge', 'CategoryAdmin'),
+        allowed = set(interface.PAGES) | {('PublicationWorkflow', 'Translations'), ('PublicationWorkflow', 'WebHome'),
+            ('PublicationWorkflow', 'Overview'), ('Knowledge', 'CategoryAdmin'),
             ('LuxPedia/Code', 'CategoryHomeTemplate'), ('LuxPedia/Code', 'InterfaceTranslations'),
             ('LuxPedia/Code', 'CategoryList'), ('LuxPedia/Code', 'ArticleList'),
             ('LuxPedia/Code', 'DraftList'), ('LuxPedia/Code', 'DraftTools'),

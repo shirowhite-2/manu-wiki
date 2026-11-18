@@ -36,8 +36,9 @@ def apply(module, wiki):
     # XWiki REST serializes list properties with '|'; preserve spaces in page names.
     exclusions = current.get('exclusions', '').split('|')
     exclusions = [value for value in exclusions if value]
-    if 'XWiki.WebHome' not in exclusions:
-        exclusions.append('XWiki.WebHome')
+    for reference in ('XWiki.WebHome', 'PublicationWorkflow.WebHome'):
+        if reference not in exclusions:
+            exclusions.append(reference)
     wiki.ensure_object_values('PanelsCode', 'NavigationConfiguration', cls, {'exclusions': '|'.join(exclusions)})
     panel_class = 'Panels.PanelClass'
     panels = wiki.objects('Panels', 'Navigation', panel_class)

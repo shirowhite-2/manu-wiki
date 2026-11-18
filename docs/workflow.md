@@ -100,7 +100,7 @@ published → Edit draft → draft（旧发布页保留）
 1. **新建文章**：在 Drafts 创建文章；编辑者在 CKEditor 上方选择“审核通过后发布到分类”（默认文章主分类），然后点 **保存并提交审核**。系统保存分类元数据、自动开始工作流并提交审核，不需要展开高级选项或手填发布位置。
 2. **修改已发布文章**：在 Knowledge 的原文章页面打开右侧 Workflow 面板，点击 **Go to draft**。系统打开与原发布页关联的草稿；编辑者修改后点 **保存并提交审核**，目标位置保持原样。审核人发布后更新原 Knowledge 页面。
 3. **审核与发布**：编辑者提交后状态为 `validating`。审核人可在 Workflow 面板执行 Publish 或 Refuse。
-4. **审核队列**：从 `Drafts.WebHome` 点击 **待审核队列**，或直接打开 `PublicationWorkflow.Overview`；列表显示 validating 状态的待审文章。待审状态显示为“待审核，尚未发布”，避免误认为已经通过。
+4. **审核队列**：从 `Drafts.WebHome` 点击 **待审核队列**，或从 **帮助中心 → Workflow → 审核队列** 进入（`LuxPedia.Workflow.ReviewQueue`）；列表显示 validating 状态的待审文章。待审状态显示为“待审核，尚未发布”，避免误认为已经通过。
 5. **管理员**：编辑器仍保留普通 **Done / Save**，不会自动提交审核。
 
 目前的 `Knowledge` 中 ArticleClass 页面会登记为工作流发布目标；已有同分类、同名 Drafts 页面会自动关联到原目标。其余历史文章从 Knowledge 点击 Go to draft 时，会在 Drafts 创建关联草稿。Drafts 页面不再依赖 hidden 标记隐藏；读者和匿名用户仍被空间 VIEW ACL 拒绝，因此页面列表只对有权限的编辑者/审核人可见。`Drafts.WebHome` 使用内置 Documents 宏列出文章并提供待审核队列入口；编辑者可浏览但不能编辑该系统维护页，普通草稿页面不受此限制。

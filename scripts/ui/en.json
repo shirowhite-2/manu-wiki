@@ -127,5 +127,6 @@
   "page": "Page",
   "pagination": "Pagination",
   "previous": "Previous",
-  "next": "Next"
+  "next": "Next",
+  "workflowCenter": "Workflow"
 }
