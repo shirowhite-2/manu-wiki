@@ -14,6 +14,67 @@
       return new DOMParser().parseFromString(body, 'text/html').body.textContent.trim();
     });
   }
+  function linkedDraftLocation() {
+    var forms = document.querySelectorAll('.publicationworkflow-info form, .publicationworkflow-information form');
+    for (var form of forms) {
+      if ((form.getAttribute('method') || 'get').toLowerCase() !== 'get') { continue; }
+      var url;
+      try { url = new URL(form.getAttribute('action') || '', location.href); } catch (error) { continue; }
+      if (url.origin !== location.origin || !url.pathname.startsWith('/bin/view/Drafts/')) { continue; }
+      var parts = url.pathname.slice('/bin/view/'.length).split('/').filter(Boolean);
+      if (url.pathname.endsWith('/')) { parts.push('WebHome'); }
+      if (parts.length < 2 || parts.length === 2 && parts[1] === 'WebHome') { continue; }
+      // Use URL segments, preserving literal dots and escaped names in page names.
+      var page = parts.pop();
+      var rest = parts.map(function (part) { return 'spaces/' + encodeURIComponent(decodeURIComponent(part)); }).join('/') +
+        '/pages/' + encodeURIComponent(decodeURIComponent(page));
+      return { url: url, rest: rest };
+    }
+    return null;
+  }
+
+  function requestFreshDraft(reference) {
+    // A stale page can retain a link to a draft that an administrator deleted.
+    // Ask the native workflow to find or recreate it; never synthesize or overwrite content.
+    if (!draftActionsSnapshot || draftActionsSnapshot.status !== 'published') {
+      return Promise.reject(new Error('Target is not published'));
+    }
+    return freshFormToken().then(function (token) {
+      if (!token) { throw new Error('Missing form token'); }
+      var form = document.createElement('form');
+      form.method = 'post'; form.action = '/bin/view/PublicationWorkflow/Script'; form.hidden = true;
+      var fields = { action: 'getEditableDraft', workflowdoc: reference, form_token: token };
+      Object.keys(fields).forEach(function (name) {
+        var input = document.createElement('input'); input.type = 'hidden'; input.name = name; input.value = fields[name];
+        form.appendChild(input);
+      });
+      document.body.appendChild(form); form.submit();
+    });
+  }
+
+  function openKnowledgeDraft(reference) {
+    actionPending = true;
+    sessionStorage.setItem(EDIT_TARGET, reference.replace(/^xwiki:/, ''));
+    renderDraftActions();
+    var form = workflowActionForm(['getEditableDraft', 'editDraft']);
+    if (form && workflowFormSubmit(form)) { return; }
+    var linked = linkedDraftLocation();
+    var open = linked ? fetch(REST + linked.rest, {
+      credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' }
+    }).then(function (response) {
+      if (response.status === 404) { return requestFreshDraft(reference); }
+      if (!response.ok) {
+        var error = new Error('HTTP ' + response.status); error.status = response.status; throw error;
+      }
+      location.assign(linked.url.href);
+    }) : requestFreshDraft(reference);
+    open.catch(function (error) {
+      actionPending = false; sessionStorage.removeItem(EDIT_TARGET);
+      window.alert(t(error.status === 401 || error.status === 403 ? 'draftAccessDenied' : 'draftOpenFailed'));
+      renderDraftActions();
+    });
+  }
+
   function renderDraftActions() {
     if (!uiRoles || (!uiRoles.editor && !uiRoles.admin) || location.pathname.indexOf('/bin/view/') !== 0) { return; }
     var reference = documentReference();
@@ -96,13 +157,7 @@
       });
     } else if (knowledge) {
       button('luxpedia-edit-article', 'editArticle', function () {
-        var form = workflowActionForm(['getEditableDraft', 'editDraft']);
-        if (!form) { window.alert(t('editArticleUnavailable')); return; }
-        actionPending = true; renderDraftActions();
-        sessionStorage.setItem(EDIT_TARGET, reference.replace(/^xwiki:/, ''));
-        if (!workflowFormSubmit(form)) {
-          actionPending = false; sessionStorage.removeItem(EDIT_TARGET); renderDraftActions();
-        }
+        openKnowledgeDraft(reference);
       }, true);
       // Native Edit must open the linked draft, rather than request EDIT on the published copy.
       // Administrators retain their native recovery/edit tools.

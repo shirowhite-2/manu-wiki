@@ -128,5 +128,7 @@
   "pagination": "分页",
   "previous": "上一页",
   "next": "下一页",
-  "workflowCenter": "工作流"
+  "workflowCenter": "工作流",
+  "draftAccessDenied": "你没有权限打开这个草稿，请联系管理员。",
+  "draftOpenFailed": "暂时无法打开草稿，请刷新页面重试；若仍然失败，请联系管理员。"
 }

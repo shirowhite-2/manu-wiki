@@ -82,7 +82,7 @@ def apply(module, wiki):
     wiki.ensure_object_values("LuxPedia/Workflow", "PolicyStatus", "XWiki.XWikiRights", {
         "groups": "XWiki.LuxManagers,XWiki.XWikiAdminGroup", "levels": "view", "allow": "1"})
     status, body = wiki.request("GET", "/bin/get/LuxPedia/Workflow/PolicyStatus?outputSyntax=plain")
-    verify_response(status, body, 'luxpedia-workflow-policy-5', 'PolicyStatus')
+    verify_response(status, body, 'luxpedia-workflow-policy-6', 'PolicyStatus')
     module.log("server workflow policy is active")
     wiki.ensure_page("LuxPedia/Code", "ReviewAuditClass", "Review submission audit", "Server-managed submission audit.", hidden=True)
     wiki.ensure_page("LuxPedia/Workflow", "PolicySetup", "Workflow policy setup", SETUP, hidden=True, update=True)

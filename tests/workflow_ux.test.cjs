@@ -46,6 +46,8 @@ async function wikiFixture(options = {}) {
       <input name="workflowdoc" type="hidden" value="${reference}">
       ${fields}<input type="submit" value="Continue"></form>`;
   }
+  const linkedDraftReference = options.draftReference || 'Drafts.Linked.Article';
+  const linkedDraftPath = options.draftPath || '/bin/view/' + linkedDraftReference.split('.').join('/');
   function html(edit, requestedLanguage) {
     const nativeLanguage = requestedLanguage || options.serverLanguage || '';
     const start = form('start', `<input name="targetSpace" value="Drafts">
@@ -56,7 +58,9 @@ async function wikiFixture(options = {}) {
       <select name="workflow"><option value="LuxPedia.Workflow.Config">LuxPedia 发布流程配置</option></select>`);
     const workflow = !state.status ? start : state.status === 'draft' ? form('submitformoderation') :
       state.status === 'validating' ? form('publish') + form('validate') + form('refusevalidation') + form('archive') :
-      state.status === 'published' ? form('getEditableDraft') + form('archive') + form('unpublish') : '';
+      state.status === 'published' ? (options.existingDraftState ?
+        `<form method="get" action="${linkedDraftPath}"><input type="submit" value="Go to draft"></form>` :
+        options.noDraftForm ? '' : form('getEditableDraft')) + form('archive') + form('unpublish') : '';
     return `<!doctype html><html lang="${nativeLanguage}"><title>Local workflow test fixture — production theme not loaded</title><meta name="document" content="${reference}">
       ${options.navbar ? '<header id="headerglobal"><nav id="menuview"><ul class="navbar-right"><li id="original-menu">Original menu</li></ul></nav></header>' : ''}
       <p role="note">Local test fixture. The production LuxPedia theme is not loaded.</p>
@@ -121,7 +125,21 @@ async function wikiFixture(options = {}) {
         reviewer: options.role === 'reviewer', admin: !!options.admin
       }) });
     }
+    if (pathname === linkedDraftPath && request.method() === 'GET' && options.existingDraftState) {
+      reference = linkedDraftReference;
+      viewPath = linkedDraftPath;
+      editPath = viewPath.replace('/view/', '/edit/');
+      state.status = options.existingDraftState;
+    }
     if (pathname.startsWith('/rest/')) {
+      const linkedParts = linkedDraftPath.slice('/bin/view/'.length).split('/').filter(Boolean);
+      if (linkedDraftPath.endsWith('/')) { linkedParts.push('WebHome'); }
+      const existingDraftRest = '/rest/wikis/xwiki/' + linkedParts
+        .map((part, index, parts) => (index === parts.length - 1 ? 'pages/' : 'spaces/') + part).join('/');
+      if (pathname === existingDraftRest) {
+        if (options.draftLookupStatus) { return route.fulfill({ status: options.draftLookupStatus, body: '' }); }
+        return json({ fullName: linkedDraftReference });
+      }
       if (pathname.includes('/objects/XWiki.XWikiGroups')) {
         return route.fulfill({ status: 403, body: 'Private role membership' });
       }
@@ -475,6 +493,89 @@ test('an editor opens a linked draft from Knowledge while keeping the published 
     assert.equal(wiki.state.status, 'draft');
   } finally { await wiki.context.close(); }
 });
+
+for (const pending of [false, true]) {
+  test('existing native GET draft link opens ' + (pending ? 'pending review without editing' : 'the editable draft'), async () => {
+    const target = 'Knowledge.Technical.Article';
+    const wiki = await wikiFixture({ reference: target, status: 'published', linkedTarget: target,
+      existingDraftState: pending ? 'validating' : 'draft', nativeEdit: true });
+    try {
+      await wiki.page.goto(wiki.origin + '/bin/view/Knowledge/Technical/Article');
+      await wiki.page.locator('#luxpedia-edit-article').click();
+      await wiki.page.waitForURL(new RegExp('/bin/' + (pending ? 'view' : 'edit') + '/Drafts/Linked/Article'));
+      if (pending) {
+        await wiki.page.locator('#luxpedia-withdraw-review').waitFor();
+        assert.equal(await wiki.page.locator('#luxpedia-continue-editing').count(), 0);
+      }
+      assert.equal(wiki.state.target, target);
+      assert.deepEqual(wiki.state.actions, []);
+      assert.deepEqual(wiki.state.alerts, []);
+      assert.deepEqual(wiki.state.errors, []);
+    } finally { await wiki.context.close(); }
+  });
+}
+
+test('a nested draft homepage GET link preserves the trailing slash and opens its editor', async () => {
+  const target = 'Knowledge.test.WebHome';
+  const wiki = await wikiFixture({ reference: target, status: 'published', linkedTarget: target,
+    existingDraftState: 'draft', draftReference: 'Drafts.test.WebHome', draftPath: '/bin/view/Drafts/test/' });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/view/Knowledge/test/');
+    await wiki.page.locator('#luxpedia-edit-article').click();
+    await wiki.page.waitForURL(/\/bin\/edit\/Drafts\/test\//);
+    assert.equal(wiki.state.target, target);
+    assert.deepEqual(wiki.state.actions, []);
+    assert.deepEqual(wiki.state.alerts, []);
+    assert.deepEqual(wiki.state.errors, []);
+  } finally { await wiki.context.close(); }
+});
+
+test('a stale link to a deleted draft recreates through the native authenticated workflow', async () => {
+  const target = 'Knowledge.test.WebHome';
+  const wiki = await wikiFixture({ reference: target, status: 'published', linkedTarget: target,
+    existingDraftState: 'draft', draftLookupStatus: 404 });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/view/Knowledge/test/');
+    await wiki.page.locator('#luxpedia-edit-article').click();
+    await wiki.page.waitForURL(/\/bin\/edit\/Drafts\/Linked\/Article/);
+    assert.equal(wiki.state.target, target);
+    assert.deepEqual(wiki.state.actions.map(action => action.action), ['getEditableDraft']);
+    assert.equal(wiki.state.actions[0].workflowdoc, target);
+    assert.equal(wiki.state.actions[0].form_token, 'test-token');
+    assert.deepEqual(wiki.state.alerts, []);
+    assert.deepEqual(wiki.state.errors, []);
+  } finally { await wiki.context.close(); }
+});
+
+test('a published target without a rendered native form still requests its draft through POST', async () => {
+  const target = 'Knowledge.test.WebHome';
+  const wiki = await wikiFixture({ reference: target, status: 'published', linkedTarget: target, noDraftForm: true });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/view/Knowledge/test/');
+    await wiki.page.locator('#luxpedia-edit-article').click();
+    await wiki.page.waitForURL(/\/bin\/edit\/Drafts\/Linked\/Article/);
+    assert.equal(wiki.state.actions[0].workflowdoc, target);
+    assert.equal(wiki.state.actions[0].form_token, 'test-token');
+    assert.deepEqual(wiki.state.errors, []);
+  } finally { await wiki.context.close(); }
+});
+
+for (const status of [401, 403, 500]) {
+  test('a draft lookup failure ' + status + ' never recreates or overwrites a draft', async () => {
+    const target = 'Knowledge.Technical.Article';
+    const wiki = await wikiFixture({ reference: target, status: 'published', linkedTarget: target,
+      existingDraftState: 'draft', draftLookupStatus: status });
+    try {
+      await wiki.page.goto(wiki.origin + '/bin/view/Knowledge/Technical/Article');
+      await wiki.page.locator('#luxpedia-edit-article').click();
+      await wiki.page.waitForFunction(() => !document.querySelector('#luxpedia-edit-article').disabled);
+      assert.match(wiki.state.alerts[0], status === 401 || status === 403 ? /do not have permission/i : /draft could not be opened/i);
+      assert.match(wiki.page.url(), /Knowledge\/Technical\/Article/);
+      assert.deepEqual(wiki.state.actions, []);
+      assert.deepEqual(wiki.state.errors, []);
+    } finally { await wiki.context.close(); }
+  });
+}
 
 test('native Edit on Knowledge/test opens its linked draft instead of editing the published copy', async () => {
   const wiki = await wikiFixture({ reference: 'Knowledge.test.WebHome', status: 'published',

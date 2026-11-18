@@ -306,6 +306,8 @@ public class WorkflowPolicyListener implements EventListener
         doc.removeObjects("XWiki.XWikiRights");
         right(doc, "XWiki.LuxEditors", state.equals("draft") ? "view,comment,edit" : "view", true, context);
         right(doc, "XWiki.LuxReviewers", "view,comment", true, context);
+        // A page-level grant from upstream or creator rights must never expose deletion.
+        right(doc, "XWiki.LuxEditors,XWiki.LuxReviewers", "delete", false, context);
         if (!state.equals("draft")) {
             right(doc, "XWiki.LuxEditors,XWiki.LuxReviewers", "edit", false, context);
         }
@@ -361,7 +363,7 @@ public class WorkflowPolicyListener implements EventListener
         new IdentityDirectory(this, context).initialize();
     }
 
-    public String getPolicyVersion() { return "luxpedia-workflow-policy-5"; }
+    public String getPolicyVersion() { return "luxpedia-workflow-policy-6"; }
     /** Deployment migration: remove historical validator EDIT grants without re-authoring content. */
     public int repairExistingDraftRights(XWikiContext context) throws Exception {
         require(authorization.hasAccess(Right.ADMIN, context.getUserReference(),

@@ -403,6 +403,33 @@ class WorkflowPolicyListenerTest {
         states(null, "published"); DocumentUpdatingEvent event = new DocumentUpdatingEvent();
         policy.onEvent(event, doc, context); assertTrue(((CancelableEvent) event).isCanceled());
     }
+    @Test void deletingArticlesIsCanceledForEveryOrdinaryRoleIncludingTheCreator() throws Exception {
+        for (String role : List.of("Editors", "Reviewers", "Readers")) {
+            group(role);
+            for (String reference : List.of("Drafts.Article.WebHome", "Knowledge.Article.WebHome")) {
+                doc = document(reference); when(doc.getOriginalDocument()).thenReturn(old);
+                when(doc.getCreatorReference()).thenReturn(user);
+                var event = new org.xwiki.bridge.event.DocumentDeletingEvent();
+                policy.onEvent(event, doc, context);
+                assertTrue(event.isCanceled(), role + " cannot delete " + reference);
+            }
+        }
+    }
+    @Test void everyDraftStateExplicitlyDeniesDeleteToEditorsAndReviewers() throws Exception {
+        for (String state : List.of("draft", "validating", "valid", "published", "archived")) {
+            rights.clear();
+            policy.normalizeDraftRights(doc, state, context);
+            assertTrue(rights.stream().anyMatch(rule -> {
+                var calls = mockingDetails(rule).getInvocations();
+                return calls.stream().anyMatch(call -> call.getMethod().getName().equals("set") &&
+                    call.getArgument(0).equals("levels") && call.getArgument(1).equals("delete")) &&
+                    calls.stream().anyMatch(call -> call.getMethod().getName().equals("set") &&
+                    call.getArgument(0).equals("groups") && call.getArgument(1).equals("XWiki.LuxEditors,XWiki.LuxReviewers")) &&
+                    calls.stream().anyMatch(call -> call.getMethod().getName().equals("set") &&
+                    call.getArgument(0).equals("allow") && call.getArgument(1).equals(0));
+            }), "Missing explicit DELETE denial for " + state);
+        }
+    }
     @Test void administratorKeepsRecoveryAccess() {
         when(policy.authorization.hasAccess(eq(Right.ADMIN), eq(user), any())).thenReturn(true);
         states(null, "published"); assertDoesNotThrow(() -> policy.check(doc, context, true));

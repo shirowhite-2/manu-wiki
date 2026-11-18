@@ -128,5 +128,7 @@
   "pagination": "Pagination",
   "previous": "Previous",
   "next": "Next",
-  "workflowCenter": "Workflow"
+  "workflowCenter": "Workflow",
+  "draftAccessDenied": "You do not have permission to open this draft. Contact an administrator.",
+  "draftOpenFailed": "The draft could not be opened. Refresh the page and try again; if the problem continues, contact an administrator."
 }
