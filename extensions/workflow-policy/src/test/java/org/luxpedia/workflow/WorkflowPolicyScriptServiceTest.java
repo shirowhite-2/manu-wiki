@@ -32,7 +32,7 @@ class WorkflowPolicyScriptServiceTest {
         service.authorization = mock(AuthorizationManager.class);
         service.csrf = mock(CSRFToken.class);
         listener = mock(WorkflowPolicyListener.class); service.listener = listener;
-        when(listener.getPolicyVersion()).thenReturn("luxpedia-workflow-policy-4");
+        when(listener.getPolicyVersion()).thenReturn("luxpedia-workflow-policy-5");
         context = mock(XWikiContext.class); wiki = mock(XWiki.class); request = mock(XWikiRequest.class);
         when(context.getWiki()).thenReturn(wiki);
         when(context.getWikiId()).thenReturn("xwiki");
@@ -47,7 +47,7 @@ class WorkflowPolicyScriptServiceTest {
     }
 
     @Test void administratorCanCheckComponentWithoutProgrammingRights() {
-        assertEquals("luxpedia-workflow-policy-4", service.status());
+        assertEquals("luxpedia-workflow-policy-5", service.status());
         verify(service.authorization).hasAccess(eq(Right.ADMIN), any(),
             eq(new DocumentReference("xwiki", "XWiki", "XWikiPreferences")));
         verifyNoMoreInteractions(service.authorization);
@@ -81,6 +81,7 @@ class WorkflowPolicyScriptServiceTest {
         verify(schema).addTextField("submittedVersion", "Submitted version", 30);
         verify(wiki).saveDocument(audit, "Ensure review audit fields", true, context);
         verify(listener).repairExistingDraftRights(context);
+        verify(listener).repairIdentityPrivacy(context);
     }
     @Test void existingAuditSchemaIsNotSavedAgain() throws Exception {
         XWikiDocument original = mock(XWikiDocument.class), audit = mock(XWikiDocument.class);
@@ -92,6 +93,26 @@ class WorkflowPolicyScriptServiceTest {
         assertEquals("AUDIT_CLASS_READY", service.initialize("valid-token"));
         verify(wiki, never()).saveDocument(any(XWikiDocument.class), anyString(), anyBoolean(), any(XWikiContext.class));
         verify(listener).repairExistingDraftRights(context);
+        verify(listener).repairIdentityPrivacy(context);
+    }
+
+    @Test void currentRolesUsesOnlyActingUserAndActualAdminAuthorization() throws Exception {
+        when(service.authorization.hasAccess(eq(Right.ADMIN), any(), any())).thenReturn(false);
+        when(listener.groups(context.getUserReference(), context)).thenReturn(java.util.Set.of(
+            "xwiki:XWiki.LuxEditors", "xwiki:XWiki.LuxReviewers"));
+        assertEquals("{\"editor\":true,\"reviewer\":true,\"admin\":false}", service.currentRoles());
+        verify(listener).groups(context.getUserReference(), context);
+        verifyNoInteractions(request);
+        when(context.getUserReference()).thenReturn(new DocumentReference("xwiki", "XWiki", "Admin"));
+        when(listener.groups(context.getUserReference(), context)).thenReturn(java.util.Set.of());
+        assertEquals("{\"editor\":false,\"reviewer\":false,\"admin\":false}", service.currentRoles());
+    }
+    @Test void guestHasNoRolesAndNonAdminDirectoryReadsExposeNothing() throws Exception {
+        when(service.authorization.hasAccess(eq(Right.ADMIN), any(), any())).thenReturn(false);
+        assertEquals(java.util.Map.of("allowed", false), service.users("all", "", "1"));
+        when(context.getUserReference()).thenReturn(null);
+        assertEquals("{\"editor\":false,\"reviewer\":false,\"admin\":false}", service.currentRoles());
+        verifyNoInteractions(listener, wiki);
     }
 
     XWikiDocument pendingDraft(boolean allowed) throws Exception {

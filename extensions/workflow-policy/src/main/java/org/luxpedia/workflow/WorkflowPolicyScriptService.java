@@ -37,6 +37,24 @@ public class WorkflowPolicyScriptService implements ScriptService
             context.getUserReference(), new DocumentReference(context.getWikiId(), "XWiki", "XWikiPreferences"));
     }
 
+    /** Only the acting user's flags, never an arbitrary user's memberships. */
+    public String currentRoles() throws Exception {
+        XWikiContext context = context();
+        boolean admin = administrator(context);
+        var groups = context.getUserReference() == null ? java.util.Set.<String>of() :
+            ((WorkflowPolicyListener) listener).groups(context.getUserReference(), context);
+        String prefix = context.getWikiId() + ":XWiki.Lux";
+        return "{\"editor\":" + groups.contains(prefix + "Editors") + ",\"reviewer\":" +
+            groups.contains(prefix + "Reviewers") + ",\"admin\":" + admin + "}";
+    }
+
+    /** Paginated private directory. Authorization is independent of the page ACL. */
+    public java.util.Map<String, Object> users(String role, String search, String page) throws Exception {
+        XWikiContext context = context();
+        if (!administrator(context)) { return java.util.Map.of("allowed", false); }
+        return new IdentityDirectory((WorkflowPolicyListener) listener, context).users(role, search, page);
+    }
+
     public String status() {
         XWikiContext context = context();
         return administrator(context) ? ((WorkflowPolicyListener) listener).getPolicyVersion() : "POLICY_FORBIDDEN";
@@ -59,6 +77,7 @@ public class WorkflowPolicyScriptService implements ScriptService
         if (changed) { context.getWiki().saveDocument(audit, "Ensure review audit fields", true, context); }
         ((WorkflowPolicyListener) listener).repairExistingDraftRights(context);
         ((WorkflowPolicyListener) listener).registerExistingKnowledgeTargets(context);
+        ((WorkflowPolicyListener) listener).repairIdentityPrivacy(context);
         return "AUDIT_CLASS_READY";
     }
 

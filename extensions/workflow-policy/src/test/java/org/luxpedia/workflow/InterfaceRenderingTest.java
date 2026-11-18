@@ -158,4 +158,54 @@ class InterfaceRenderingTest {
         assertFalse(table.getDocumentElement().getTextContent().contains("Published"));
         assertFalse(table.getDocumentElement().getTextContent().contains("Archived"));
     }
+
+    public static class Directory {
+        final boolean allowed;
+        Directory(boolean allowed) { this.allowed = allowed; }
+        public Map<String, Object> users(String role, String search, String page) {
+            return allowed ? Map.of("allowed", true, "role", "editors", "search", "<script>&\"", "total", 501L,
+                "page", 2, "pages", 21, "users", List.of(Map.of("reference", "XWiki.alice", "label", "<script>Alice</script>",
+                    "roles", List.of("editors", "reviewers")))) : Map.of("allowed", false);
+        }
+    }
+    public static class Request {
+        public String getParameter(String key) { return null; }
+    }
+    public static class Strings {
+        public String capitalize(String value) { return Character.toUpperCase(value.charAt(0)) + value.substring(1); }
+    }
+    public static class DirectoryEscape extends Escape {
+        public String url(Object value) { return java.net.URLEncoder.encode(value.toString(), java.nio.charset.StandardCharsets.UTF_8); }
+    }
+    String renderDirectory(String language, boolean allowed) throws Exception {
+        var engine = new VelocityEngine(); engine.init();
+        var context = new VelocityContext();
+        context.put("services", Map.of("localization", new Localization(language), "luxpediaWorkflowPolicy", new Directory(allowed)));
+        context.put("xwiki", new Wiki()); context.put("escapetool", new DirectoryEscape());
+        context.put("request", new Request()); context.put("stringtool", new Strings());
+        context.put("xcontext", Map.of("locale", Map.of("language", language)));
+        var output = new StringWriter();
+        assertTrue(engine.evaluate(context, output, "directory", Files.readString(UI.resolve("pages/users.xwiki"))));
+        return output.toString();
+    }
+    @Test void directoryRendersLocalizedRolesAndEscapesUserValuesWithWorkingPageLinks() throws Exception {
+        for (String language : List.of("en", "zh")) {
+            String html = renderDirectory(language, true);
+            assertFalse(html.contains("$"), html);
+            assertTrue(html.contains("XWiki.Users.Editors.WebHome"), html);
+            assertTrue(html.contains("XWiki.alice"), html);
+            assertTrue(html.contains("&lt;script&gt;Alice&lt;/script&gt;"), html);
+            assertTrue(html.contains("directoryPage=1"), html);
+            assertTrue(html.contains("directoryPage=3"), html);
+            assertTrue(html.contains("2 / 21"), html);
+            assertFalse(html.contains("<script>"), html);
+            assertTrue(html.contains(language.equals("en") ? "Editors" : "编辑者"));
+            assertFalse(html.contains(language.equals("en") ? "编辑者" : "Previous"));
+        }
+    }
+    @Test void nonAdministratorDirectoryHasNoProfileLinksOrSearchResults() throws Exception {
+        String html = renderDirectory("en", false);
+        assertFalse(html.contains("XWiki.alice")); assertFalse(html.contains("<table"));
+        assertFalse(html.contains("<form")); assertFalse(html.contains("$"), html);
+    }
 }

@@ -1,0 +1,17 @@
+{{velocity}}
+#if($services.security.authorization.hasAccess('admin', $services.model.resolveDocument('XWiki.XWikiPreferences')))
+= $services.localization.render('luxpedia.xwikiAdmin') =
+
+$services.localization.render('luxpedia.userDirectoryIntro')
+
+* [[$services.localization.render('luxpedia.users')>>XWiki.Users.WebHome]]
+* [[$services.localization.render('luxpedia.role.managers')>>XWiki.Users.Managers.WebHome]]
+* [[$services.localization.render('luxpedia.role.editors')>>XWiki.Users.Editors.WebHome]]
+* [[$services.localization.render('luxpedia.role.reviewers')>>XWiki.Users.Reviewers.WebHome]]
+* [[$services.localization.render('luxpedia.role.readers')>>XWiki.Users.Readers.WebHome]]
+* [[$services.localization.render('luxpedia.role.unassigned')>>XWiki.Users.Unassigned.WebHome]]
+* [[$services.localization.render('luxpedia.wikiSettings')>>XWiki.XWikiPreferences||queryString='editor=globaladmin' action='admin']]
+#else
+$services.localization.render('luxpedia.adminOnly')
+#end
+{{/velocity}}

@@ -96,35 +96,20 @@ WORKFLOW_UX_JS = r"""(function () {
       });
   }
 
-  function groupHasMember(group, user, visited) {
-    visited = new Set(visited || []);
-    if (visited.has(group)) { return Promise.resolve(false); }
-    visited.add(group);
-    var path = 'spaces/XWiki/pages/' + encodeURIComponent(group) + '/objects/XWiki.XWikiGroups';
-    return getJson(path).then(function (data) {
-      var objects = data.objectSummaries || [];
-      return Promise.all(objects.map(function (object) {
-        return getJson('spaces/XWiki/pages/' + encodeURIComponent(group) +
-          '/objects/XWiki.XWikiGroups/' + object.number + '/properties/member')
-          .then(function (property) {
-            if (property.value === user) { return true; }
-            var nested = (property.value || '').replace(/^xwiki:/, '').match(/^XWiki\.(.+)$/);
-            return nested ? groupHasMember(nested[1], user, visited) : false;
-          })
-          .catch(function () { return false; });
-      })).then(function (values) { return values.some(Boolean); });
-    }).catch(function () { return false; });
-  }
-
-  function isEditor(user) {
-    return groupHasMember('LuxEditors', user);
-  }
-
-  function isManager(user) {
-    return Promise.all([
-      groupHasMember('LuxManagers', user),
-      groupHasMember('XWikiAdminGroup', user)
-    ]).then(function (values) { return values.some(Boolean) || user === 'XWiki.Admin'; });
+  var rolesPromise;
+  function currentRoles() {
+    if (!rolesPromise) {
+      rolesPromise = fetch('/bin/get/LuxPedia/Workflow/CurrentRoles?outputSyntax=plain', {
+        credentials: 'same-origin', cache: 'no-store'
+      }).then(function (response) {
+        if (!response.ok) { throw new Error('HTTP ' + response.status); }
+        return response.text();
+      }).then(function (body) {
+        var data = JSON.parse(new DOMParser().parseFromString(body, 'text/html').body.textContent);
+        return { editor: data.editor === true, reviewer: data.reviewer === true, admin: data.admin === true };
+      });
+    }
+    return rolesPromise;
   }
 
   function spaceAndPage(reference) {
@@ -537,13 +522,13 @@ WORKFLOW_UX_JS = r"""(function () {
     var user = currentUser();
     if (!reference || !user || initPending || initializedReference === reference) { return; }
     initPending = true;
-    Promise.all([isEditor(user), isManager(user), groupHasMember('LuxReviewers', user)]).then(function (roles) {
+    currentRoles().then(function (roles) {
       initPending = false;
-      uiRoles = { editor: roles[0], admin: roles[1], reviewer: roles[2] };
+      uiRoles = roles;
       translateWorkflowUI();
-      if (!roles[0] && !roles[1]) { return; }
+      if (!roles.editor && !roles.admin) { return; }
       initializedReference = reference;
-      var isAdmin = roles[1];
+      var isAdmin = roles.admin;
       waitForDoneButton(reference, isAdmin, 0);
       installCategorySelector(reference, isAdmin, 0);
       if (location.pathname.indexOf('/bin/view/') === 0) {

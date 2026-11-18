@@ -131,6 +131,40 @@ class WorkflowPolicyListenerTest {
         when(doc.getOriginalDocument()).thenReturn(old);
         group("Editors");
     }
+    void profile(String account) throws Exception {
+        old = document("XWiki." + account); doc = document("XWiki." + account);
+        when(doc.getOriginalDocument()).thenReturn(old);
+        when(doc.getObject("XWiki.XWikiUsers")).thenReturn(mock(BaseObject.class));
+        when(old.getObject("XWiki.XWikiUsers")).thenReturn(mock(BaseObject.class));
+    }
+    @Test void ownProfileCanBeEditedButItsSecurityObjectsCannot() throws Exception {
+        profile("currentUser");
+        assertDoesNotThrow(() -> policy.check(doc, context, false));
+        assertEquals(2, rights.size());
+        changedClass("XWiki.XWikiRights");
+        assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
+        changedClass("XWiki.XWikiGroups");
+        assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
+    }
+    @Test void otherProfilesAndSelfCreationAndDirectorySavesAreAdminOnly() throws Exception {
+        profile("someoneElse");
+        assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
+        profile("currentUser"); when(old.isNew()).thenReturn(true);
+        assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
+        for (String reference : List.of("XWiki.WebHome", "XWiki.Users.Editors.WebHome")) {
+            doc = document(reference); when(doc.getOriginalDocument()).thenReturn(old);
+            assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
+        }
+    }
+    @Test void adminCreatedProfilesReceivePrivacyAndRoleGroupsCannotBeEditedByMembers() throws Exception {
+        profile("newAccount"); when(old.isNew()).thenReturn(true);
+        when(policy.authorization.hasAccess(eq(Right.ADMIN), any(), any())).thenReturn(true);
+        assertDoesNotThrow(() -> policy.check(doc, context, false)); assertEquals(2, rights.size());
+        when(policy.authorization.hasAccess(eq(Right.ADMIN), any(), any())).thenReturn(false);
+        doc = document("XWiki.Engineers"); when(doc.getOriginalDocument()).thenReturn(old);
+        when(doc.getObject("XWiki.XWikiGroups")).thenReturn(mock(BaseObject.class));
+        assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
+    }
     @Test void editorCanWriteAnUnsubmittedArticle() throws Exception {
         assertDoesNotThrow(() -> policy.check(doc, context, false));
     }

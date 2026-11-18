@@ -183,6 +183,15 @@ def apply(module, wiki):
     category_context = "#set($categoryRef = $doc.fullName)\n#set($flow = $doc.getObject('PublicationWorkflow.PublicationWorkflowClass'))\n#if($categoryRef.startsWith('Drafts.') && $flow)#set($categoryRef = $flow.getValue('target'))#end\n#set($catSpace = $categoryRef.replace('.WebHome', ''))\n"
     category_template = category_template.replace('#set($articles', category_context + '#set($articles', 1) + END
     wiki.ensure_page('LuxPedia/Code', 'CategoryHomeTemplate', 'Category article list', category_template, hidden=True, update=True)
+    # Directory page bodies use server localization; localize native page titles too.
+    for space, key in [('XWiki', 'xwikiAdmin'), ('XWiki/Users', 'users')] + [
+            ('XWiki/Users/' + role.capitalize(), 'role.' + role)
+            for role in ('managers', 'editors', 'reviewers', 'readers', 'unassigned')]:
+        filename = 'admin_home.xwiki' if space == 'XWiki' else 'users.xwiki'
+        role = 'all' if space == 'XWiki/Users' else space.rsplit('/', 1)[-1].lower()
+        body = (UI / 'pages' / filename).read_text().replace('__ROLE__', role)
+        wiki.ensure_page(space, 'WebHome', MESSAGES['en'][key], body, update=True)
+        ensure_translation(wiki, space, 'WebHome', 'zh', MESSAGES['zh'][key], body)
     # Branding is optional: object creation requires an existing parent page.
     # Keep an existing panel document intact and localize only its panel object.
     wiki.ensure_page('LuxPedia', 'HelpPanel', 'LuxPedia help', '', hidden=True)

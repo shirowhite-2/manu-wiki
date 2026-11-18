@@ -70,6 +70,26 @@ public class WorkflowPolicyListener implements EventListener
         XWikiDocument base = doc.getTranslation() == 0 ? doc : context.getWiki().getDocument(ref, context);
         BaseObject previous = doc.getTranslation() == 0 ? old.getObject(WF) : base.getObject(WF);
         BaseObject next = base.getObject(WF);
+        boolean directory = space.equals("XWiki") && (ref.getSpaceReferences().size() == 1 && ref.getName().equals("WebHome") ||
+            ref.getSpaceReferences().size() > 1 && ref.getSpaceReferences().get(1).getName().equals("Users"));
+        if (directory || IdentityDirectory.isIdentity(doc) || IdentityDirectory.isIdentity(old)) {
+            boolean admin = user != null && authorization.hasAccess(Right.ADMIN, user,
+                new DocumentReference(context.getWikiId(), "XWiki", "XWikiPreferences"));
+            boolean group = doc.getObject("XWiki.XWikiGroups") != null || old.getObject("XWiki.XWikiGroups") != null;
+            require(admin || (!directory && !deleting && !group && !old.isNew() && ref.equals(user)),
+                "Only administrators may manage other users or role groups.");
+            if (!admin) {
+                require(doc.getObject("XWiki.XWikiUsers") != null, "Your user account cannot be removed.");
+                for (List<ObjectDiff> changes : doc.getObjectDiff(old, doc, context)) {
+                    for (ObjectDiff change : changes) {
+                        require(change.getXClassReference().equals(resolver.resolve("XWiki.XWikiUsers", ref)),
+                            "Profile security and configuration are administrator-managed.");
+                    }
+                }
+            }
+            if (!deleting && doc.getTranslation() == 0) { new IdentityDirectory(this, context).normalizeView(doc); }
+            return;
+        }
         boolean protectedConfiguration = space.equals("LuxPedia") || space.equals("PublicationWorkflow") ||
             (space.equals("XWiki") && Set.of("LuxEditors", "LuxReviewers", "LuxReaders", "LuxManagers",
                 "XWikiPreferences", "XWikiAdminGroup", "XWikiAllGroup").contains(ref.getName()));
@@ -337,7 +357,11 @@ public class WorkflowPolicyListener implements EventListener
         require(drafts.size() == 1, "A unique matching draft workflow is required.");
         return resolver.resolve(drafts.get(0), target);
     }
-    public String getPolicyVersion() { return "luxpedia-workflow-policy-4"; }
+    public void repairIdentityPrivacy(XWikiContext context) throws Exception {
+        new IdentityDirectory(this, context).initialize();
+    }
+
+    public String getPolicyVersion() { return "luxpedia-workflow-policy-5"; }
     /** Deployment migration: remove historical validator EDIT grants without re-authoring content. */
     public int repairExistingDraftRights(XWikiContext context) throws Exception {
         require(authorization.hasAccess(Right.ADMIN, context.getUserReference(),

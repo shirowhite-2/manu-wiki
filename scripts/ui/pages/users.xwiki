@@ -1,0 +1,53 @@
+{{velocity}}
+#set($directory = $services.luxpediaWorkflowPolicy.users('__ROLE__', $request.getParameter('q'), $request.getParameter('directoryPage')))
+#if($directory.allowed)
+{{html clean="false"}}
+<h1>$escapetool.xml($services.localization.render('luxpedia.users')) — $escapetool.xml($services.localization.render("luxpedia.role.$directory.role"))</h1>
+<p>$escapetool.xml($services.localization.render('luxpedia.userDirectoryIntro'))</p>
+<nav aria-label="$escapetool.xml($services.localization.render('luxpedia.roles'))">
+#foreach($role in ['all', 'managers', 'editors', 'reviewers', 'readers', 'unassigned'])
+#set($reference = 'XWiki.Users.WebHome')
+#if($role != 'all')
+#set($folder = $stringtool.capitalize($role))
+#set($reference = "XWiki.Users.${folder}.WebHome")
+#end
+<a class="btn btn-default" href="$escapetool.xml($xwiki.getURL($reference))">$escapetool.xml($services.localization.render("luxpedia.role.$role"))</a>
+#end
+</nav>
+<form method="get" class="form-inline" style="margin:1em 0">
+<label for="user-search">$escapetool.xml($services.localization.render('luxpedia.searchUsers'))</label>
+<input class="form-control" id="user-search" type="search" name="q" maxlength="100" value="$escapetool.xml($directory.search)" />
+<input type="hidden" name="language" value="$escapetool.xml($xcontext.locale.language)" />
+<button class="btn btn-primary" type="submit">$escapetool.xml($services.localization.render('luxpedia.search'))</button>
+</form>
+<p>$escapetool.xml($services.localization.render('luxpedia.userCount')): $directory.total</p>
+<table class="table table-striped luxpedia-system-list" style="width:100%;table-layout:fixed;overflow-wrap:anywhere"><thead><tr>
+<th scope="col">$escapetool.xml($services.localization.render('luxpedia.userName'))</th>
+<th scope="col">$escapetool.xml($services.localization.render('luxpedia.account'))</th>
+<th scope="col">$escapetool.xml($services.localization.render('luxpedia.roles'))</th>
+</tr></thead><tbody>
+#foreach($user in $directory.users)
+<tr><td><a href="$escapetool.xml($xwiki.getURL($user.reference))">$escapetool.xml($user.label)</a></td>
+<td>$escapetool.xml($user.reference)</td><td>
+#foreach($role in $user.roles)<span class="label label-default">$escapetool.xml($services.localization.render("luxpedia.role.$role"))</span> #end
+#if($user.roles.isEmpty())$escapetool.xml($services.localization.render('luxpedia.role.unassigned'))#end
+</td></tr>
+#end
+#if($directory.users.isEmpty())<tr><td colspan="3">$escapetool.xml($services.localization.render('luxpedia.noUsers'))</td></tr>#end
+</tbody></table>
+<p>$escapetool.xml($services.localization.render('luxpedia.page')) $directory.page / $directory.pages</p>
+<nav aria-label="$escapetool.xml($services.localization.render('luxpedia.pagination'))">
+#if($directory.page > 1)
+#set($previous = $directory.page - 1)
+<a class="btn btn-default" href="?q=$escapetool.url($directory.search)&amp;directoryPage=$previous&amp;language=$escapetool.xml($xcontext.locale.language)">$escapetool.xml($services.localization.render('luxpedia.previous'))</a>
+#end
+#if($directory.page < $directory.pages)
+#set($next = $directory.page + 1)
+<a class="btn btn-default" href="?q=$escapetool.url($directory.search)&amp;directoryPage=$next&amp;language=$escapetool.xml($xcontext.locale.language)">$escapetool.xml($services.localization.render('luxpedia.next'))</a>
+#end
+</nav>
+{{/html}}
+#else
+$services.localization.render('luxpedia.adminOnly')
+#end
+{{/velocity}}

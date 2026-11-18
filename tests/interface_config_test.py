@@ -18,7 +18,9 @@ class FakeWiki:
         self.policy = policy
         self.pages = {}
         self.existing_pages = {('XWiki', 'XWikiPreferences')}
-        self.object_data = {}
+        self.object_data = {('Panels', 'Navigation', 'Panels.PanelClass'): {
+            'content': '{{velocity}}#navigationPanelHeader("Navigation")\n{{documentTree /}}\n#panelfooter(){{/velocity}}'}}
+        self.existing_pages.add(('Panels', 'Navigation'))
         self.objects_written = []
         self.rights = []
         self.requests = []
@@ -61,7 +63,7 @@ class FakeWiki:
     def request(self, method, path, data=None, content_type=None, **kwargs):
         self.requests.append((method, path, data))
         if 'PolicyStatus?' in path:
-            return 200, b'luxpedia-workflow-policy-4' if self.policy else b'POLICY_NOT_INSTALLED'
+            return 200, b'luxpedia-workflow-policy-5' if self.policy else b'POLICY_NOT_INSTALLED'
         if 'PolicySetup?' in path:
             return 200, b'AUDIT_CLASS_READY'
         if '/translations/' in path:
@@ -237,6 +239,39 @@ class InterfaceConfigTest(unittest.TestCase):
         self.assertEqual(MESSAGES['en']['newArticle'], 'New article')
         self.assertEqual(MESSAGES['zh']['newArticle'], '新建文章')
 
+    def test_directory_keeps_native_navigation_and_exclusions_and_is_repeatable(self):
+        import apply_user_directory as directory
+        wiki = FakeWiki()
+        cls = 'PanelsCode.NavigationConfigurationClass'
+        wiki.existing_pages.add(('PanelsCode', 'NavigationConfiguration'))
+        wiki.object_data[('PanelsCode', 'NavigationConfiguration', cls)] = {
+            'exclusions': 'Sandbox.WebHome|Help With Spaces.WebHome', 'inclusions': 'Knowledge.WebHome'}
+        original_panel = wiki.object_data[('Panels', 'Navigation', 'Panels.PanelClass')]['content']
+        directory.apply(Module, wiki)
+        directory.apply(Module, wiki)
+        config = wiki.object_data[('PanelsCode', 'NavigationConfiguration', cls)]
+        self.assertEqual(config['exclusions'], 'Sandbox.WebHome|Help With Spaces.WebHome|XWiki.WebHome')
+        self.assertEqual(config['inclusions'], 'Knowledge.WebHome')
+        panel = wiki.object_data[('Panels', 'Navigation', 'Panels.PanelClass')]
+        self.assertEqual(panel['content'].count('LUXPEDIA_ADMIN_DIRECTORY_START'), 1)
+        self.assertIn('{{documentTree /}}', panel['content'])
+        self.assertIn("hasAccess('admin'", panel['content'])
+        self.assertEqual(panel['async_cached'], '0')
+        self.assertEqual(panel['async_enabled'], '0')
+        self.assertNotIn(('XWiki', 'alice'), wiki.pages)
+        self.assertNotIn('move', str(wiki.requests))
+
+    def test_directory_has_translated_titles_and_private_role_endpoint(self):
+        wiki = FakeWiki()
+        security.apply(Module, wiki)
+        interface.apply(Module, wiki)
+        self.assertIn('currentRoles()', wiki.pages[('LuxPedia/Workflow', 'CurrentRoles')][1])
+        self.assertNotIn('groupHasMember', workflow.WORKFLOW_UX_PROPERTIES['code'])
+        self.assertNotIn('XWiki.XWikiGroups', workflow.WORKFLOW_UX_PROPERTIES['code'])
+        self.assertEqual(wiki.pages[('XWiki/Users/Editors', 'WebHome')][0], 'Editors')
+        translated = [data for method, path, data in wiki.requests if method == 'PUT' and '/spaces/Editors/' in path]
+        self.assertTrue(any('编辑者' in body for body in translated))
+
     def test_language_catalogs_match_and_default_is_english(self):
         self.assertEqual(MESSAGES['en'].keys(), MESSAGES['zh'].keys())
         wiki = FakeWiki()
@@ -253,6 +288,8 @@ class InterfaceConfigTest(unittest.TestCase):
             ('LuxPedia/Code', 'CategoryList'), ('LuxPedia/Code', 'ArticleList'),
             ('LuxPedia/Code', 'DraftList'), ('LuxPedia/Code', 'DraftTools'),
             ('LuxPedia', 'HelpPanel'), ('LuxPedia/Code', 'SourceEditUIX'), ('LuxPedia/Code', 'EditGuideUIX')}
+        allowed |= {('XWiki', 'WebHome'), ('XWiki/Users', 'WebHome')}
+        allowed |= {('XWiki/Users/' + role, 'WebHome') for role in ('Managers', 'Editors', 'Reviewers', 'Readers', 'Unassigned')}
         self.assertLessEqual(wiki.pages.keys(), allowed)
         puts = [path for method, path, data in wiki.requests if method == 'PUT']
         self.assertTrue(puts)
@@ -368,11 +405,11 @@ class InterfaceConfigTest(unittest.TestCase):
     def test_script_denial_is_not_reported_as_a_missing_jar(self):
         body = b'Failed to execute the [groovy] macro. The execution of the [groovy] script macro is not allowed.'
         with self.assertRaisesRegex(RuntimeError, 'page author cannot execute'):
-            security.verify_response(200, body, 'luxpedia-workflow-policy-4', 'PolicyStatus')
+            security.verify_response(200, body, 'luxpedia-workflow-policy-5', 'PolicyStatus')
 
     def test_policy_marker_accepts_plain_or_rendered_output(self):
-        for body in (b'luxpedia-workflow-policy-4\n', b'<p>luxpedia-workflow-policy-4</p>'):
-            security.verify_response(200, body, 'luxpedia-workflow-policy-4', 'PolicyStatus')
+        for body in (b'luxpedia-workflow-policy-5\n', b'<p>luxpedia-workflow-policy-5</p>'):
+            security.verify_response(200, body, 'luxpedia-workflow-policy-5', 'PolicyStatus')
 
     def test_admin_and_token_errors_are_distinct(self):
         with self.assertRaisesRegex(RuntimeError, 'wiki-level administrator'):

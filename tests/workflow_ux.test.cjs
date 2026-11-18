@@ -115,12 +115,15 @@ async function wikiFixture(options = {}) {
         '<a href="/bin/view/Knowledge/Technical/WebHome">技术文档</a>' +
         '<a href="/bin/view/Knowledge/Operations/WebHome">操作手册</a>' });
     }
+    if (pathname === '/bin/get/LuxPedia/Workflow/CurrentRoles') {
+      return route.fulfill({ contentType: 'text/plain', body: JSON.stringify({
+        editor: !['reviewer', 'reader'].includes(options.role) && !options.admin,
+        reviewer: options.role === 'reviewer', admin: !!options.admin
+      }) });
+    }
     if (pathname.startsWith('/rest/')) {
       if (pathname.includes('/objects/XWiki.XWikiGroups')) {
-        const editorGroup = pathname.includes('/pages/LuxEditors/') && !['reviewer', 'reader'].includes(options.role) ||
-          pathname.includes('/pages/LuxReviewers/') && options.role === 'reviewer';
-        return json(pathname.endsWith('/properties/member') ? { value: 'XWiki.editor' } :
-          { objectSummaries: editorGroup ? [{ number: 0 }] : [] });
+        return route.fulfill({ status: 403, body: 'Private role membership' });
       }
       if (pathname.includes('/objects/PublicationWorkflow.PublicationWorkflowClass')) {
         if (pathname.endsWith('/properties/status')) { return json({ value: state.status }); }
@@ -263,7 +266,7 @@ test('existing target reports submission failure and stops retrying', async () =
 test('administrator keeps the standard Done button', async () => {
   const wiki = await wikiFixture({ admin: true });
   try {
-    const rolesChecked = wiki.page.waitForResponse(response => response.url().includes('/pages/XWikiAdminGroup/objects/'));
+    const rolesChecked = wiki.page.waitForResponse(response => response.url().includes('/Workflow/CurrentRoles?'));
     await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
     // Wait until boot has performed its role checks.
     await rolesChecked;
