@@ -89,5 +89,9 @@
   "value": "Value",
   "primaryCategory": "Primary category",
   "version": "Version",
-  "summary": "Summary"
+  "summary": "Summary",
+  "queueEmpty": "No articles are awaiting review.",
+  "login": "Log in",
+  "brandTagline": "Team knowledge base",
+  "publicationConfig": "LuxPedia publication workflow"
 }

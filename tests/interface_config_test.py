@@ -18,10 +18,11 @@ class FakeWiki:
         self.policy = policy
         self.pages = {}
         self.existing_pages = {('XWiki', 'XWikiPreferences')}
-        self.object_values = {}
+        self.object_data = {}
         self.objects_written = []
         self.rights = []
         self.requests = []
+        self.article_template = None
 
     @staticmethod
     def page_path(space, page):
@@ -37,13 +38,19 @@ class FakeWiki:
         return (space, page) in self.pages or (space, page) in self.existing_pages
 
     def has_object(self, space, page, class_name):
-        return (space, page, class_name) in self.object_values
+        return (space, page, class_name) in self.object_data
+
+    def objects(self, space, page, class_name):
+        return [0] if self.has_object(space, page, class_name) else []
+
+    def object_values(self, space, page, class_name, number):
+        return dict(self.object_data[(space, page, class_name)])
 
     def ensure_object_values(self, space, page, class_name, values):
         if not self.page_exists(space, page):
             raise RuntimeError(f'Object parent page missing (HTTP 404): {space}.{page}')
         self.objects_written.append((space, page, class_name, values))
-        self.object_values.setdefault((space, page, class_name), {}).update(values)
+        self.object_data.setdefault((space, page, class_name), {}).update(values)
 
     def ensure_right(self, space, page, values):
         self.rights.append((space, page, values))
@@ -62,11 +69,16 @@ class FakeWiki:
         if path.endswith('/PublicationWorkflow/pages/Translations'):
             return 200, b'<page xmlns="http://www.xwiki.org"><content>custom.key=preserved\nworkflow.title=Workflow</content></page>'
         if path.endswith('/Templates/pages/Article'):
+            if self.article_template is not None:
+                root = ET.Element('page', xmlns='http://www.xwiki.org')
+                ET.SubElement(root, 'content').text = self.article_template
+                return 200, ET.tostring(root)
             return 404, b''
         raise AssertionError((method, path))
 
 
 class Module:
+    ARTICLE_META = workflow.load_apply_module().ARTICLE_META
     CATEGORY_ADMIN = (ROOT / 'scripts/apply_sprint1.py').read_text().split('CATEGORY_ADMIN = """', 1)[1].split('"""', 1)[0]
     SOURCE_EDIT_UIX = '{{velocity}}源码编辑{{/velocity}}'
     @staticmethod
@@ -105,6 +117,48 @@ class DraftHomeRightsWiki:
 
 
 class InterfaceConfigTest(unittest.TestCase):
+    def test_native_workflow_and_field_catalogs_have_both_languages(self):
+        import re
+        for stem in ('workflow', 'fields'):
+            catalogs = [(interface.UI / f'{stem}_{language}.properties').read_text() for language in ('en', 'zh')]
+            keys = [set(line.split('=', 1)[0] for line in content.splitlines() if '=' in line) for content in catalogs]
+            self.assertEqual(keys[0], keys[1])
+            self.assertIsNone(re.search(r'[\u3400-\u9fff]', catalogs[0]))
+        wiki = FakeWiki()
+        interface.apply(Module, wiki)
+        self.assertIn('LuxPedia.Code.ArticleClass_primaryCategory=Primary category',
+                      wiki.pages[('LuxPedia/Code', 'InterfaceTranslations')][1])
+        native = wiki.pages[('PublicationWorkflow', 'Translations')][1]
+        self.assertIn('workflow.start.advancedoptions.button=Advanced options', native)
+        self.assertIn('workflow.panel.draftVersion=Open draft', native)
+
+    def test_only_known_branding_strings_are_migrated_without_changing_theme(self):
+        for known in (True, False):
+            wiki = FakeWiki()
+            key = ('XWiki', 'XWikiPreferences', 'XWiki.XWikiPreferences')
+            wiki.object_data[key] = {'title': interface.LEGACY_BRAND_TITLE if known else 'Custom title',
+                                     'version': interface.LEGACY_BRAND_FOOTER if known else 'Custom footer',
+                                     'colorTheme': 'MyTheme', 'skin': 'MySkin'}
+            interface.apply(Module, wiki)
+            values = wiki.object_data[key]
+            self.assertEqual(values['title'], interface.BRAND_TITLE if known else 'Custom title')
+            self.assertEqual(values['version'], interface.BRAND_FOOTER if known else 'Custom footer')
+            self.assertEqual((values['colorTheme'], values['skin']), ('MyTheme', 'MySkin'))
+
+    def test_generated_article_template_gets_english_and_chinese_without_touching_custom_body(self):
+        legacy = (interface.UI / 'pages/article_zh.xwiki').read_text()
+        for content in (legacy, Module.ARTICLE_META + legacy, 'My customized template'):
+            wiki = FakeWiki()
+            wiki.article_template = content
+            interface.apply(Module, wiki)
+            if content == 'My customized template':
+                self.assertNotIn(('LuxPedia/Templates', 'Article'), wiki.pages)
+            else:
+                self.assertEqual(wiki.pages[('LuxPedia/Templates', 'Article')][1],
+                                 (interface.UI / 'pages/article_en.xwiki').read_text())
+                self.assertTrue(any(path.endswith('/Templates/pages/Article/translations/zh')
+                                    for method, path, data in wiki.requests if method == 'PUT'))
+
     def test_draft_creation_removes_only_obsolete_home_denials_and_is_repeatable(self):
         obsolete = {'groups': 'XWiki.LuxEditors', 'levels': 'edit', 'allow': '0'}
         retained = {
@@ -159,11 +213,11 @@ class InterfaceConfigTest(unittest.TestCase):
     def test_missing_optional_panel_and_menus_are_created_with_complete_registration(self):
         wiki = FakeWiki()
         interface.apply(Module, wiki)
-        panel = wiki.object_values[('LuxPedia', 'HelpPanel', 'Panels.PanelClass')]
+        panel = wiki.object_data[('LuxPedia', 'HelpPanel', 'Panels.PanelClass')]
         self.assertIn('LuxPedia.Help.WebHome', panel['content'])
         for page, name, order in [('SourceEditUIX', 'luxpedia.source.edit', 15000),
                                   ('EditGuideUIX', 'luxpedia.edit.guide', 15001)]:
-            menu = wiki.object_values[('LuxPedia/Code', page, 'XWiki.UIExtensionClass')]
+            menu = wiki.object_data[('LuxPedia/Code', page, 'XWiki.UIExtensionClass')]
             self.assertEqual(menu['extensionPointId'], 'org.xwiki.plaftorm.menu.content')
             self.assertEqual(menu['name'], name)
             self.assertEqual(menu['scope'], 'wiki')
@@ -178,22 +232,22 @@ class InterfaceConfigTest(unittest.TestCase):
         menu_key = ('LuxPedia/Code', 'SourceEditUIX', 'XWiki.UIExtensionClass')
         registration = {'name': 'custom.source.menu', 'parameters': 'order=123',
                         'scope': 'wiki', 'extensionPointId': 'custom.menu.point'}
-        wiki.object_values[menu_key] = dict(registration, content='Old localized label')
+        wiki.object_data[menu_key] = dict(registration, content='Old localized label')
         interface.apply(Module, wiki)
         for key, value in existing.items():
             self.assertEqual(wiki.pages[key], value)
         for key, value in registration.items():
-            self.assertEqual(wiki.object_values[menu_key][key], value)
-        self.assertIn("luxpedia.sourceEdit", wiki.object_values[menu_key]['content'])
+            self.assertEqual(wiki.object_data[menu_key][key], value)
+        self.assertIn("luxpedia.sourceEdit", wiki.object_data[menu_key]['content'])
 
     def test_optional_panel_and_menu_setup_can_be_repeated(self):
         wiki = FakeWiki()
         interface.apply(Module, wiki)
         pages = dict(wiki.pages)
-        objects = {key: dict(values) for key, values in wiki.object_values.items()}
+        objects = {key: dict(values) for key, values in wiki.object_data.items()}
         interface.apply(Module, wiki)
         self.assertEqual(wiki.pages, pages)
-        self.assertEqual(wiki.object_values, objects)
+        self.assertEqual(wiki.object_data, objects)
 
     def test_native_translation_keeps_unrelated_keys(self):
         wiki = FakeWiki()

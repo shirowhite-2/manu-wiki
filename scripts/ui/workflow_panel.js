@@ -18,6 +18,9 @@
       var heading = host && host.querySelector('.panel-title, .panel-heading, h2');
       if (heading) { text(heading, t('workflow')); }
       panel.querySelectorAll('form').forEach(function (form) {
+        form.querySelectorAll('select[name="workflow"] option[value="LuxPedia.Workflow.Config"]').forEach(function (option) {
+          text(option, t('publicationConfig'));
+        });
         var action = form.querySelector('input[name="action"]');
         var key = action && actions[action.value];
         if (!key) { return; }

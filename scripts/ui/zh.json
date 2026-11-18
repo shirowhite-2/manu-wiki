@@ -89,5 +89,9 @@
   "value": "值",
   "primaryCategory": "主分类",
   "version": "适用版本",
-  "summary": "摘要"
+  "summary": "摘要",
+  "queueEmpty": "暂无待审核文章。",
+  "login": "登录",
+  "brandTagline": "企业知识库",
+  "publicationConfig": "LuxPedia 文章发布流程"
 }

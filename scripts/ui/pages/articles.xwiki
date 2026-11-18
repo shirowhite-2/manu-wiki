@@ -1,0 +1,25 @@
+#set($articles = $services.query.xwql("from doc.object(LuxPedia.Code.ArticleClass) as article where (doc.space = 'Knowledge' or doc.space like 'Knowledge.%') order by doc.date desc").execute())
+#set($visible = false)
+
+
+{{html clean="false"}}
+<table class="table table-striped luxpedia-system-list" style="width:100%;table-layout:fixed;overflow-wrap:anywhere">
+<thead><tr><th scope="col">#lp('title')</th><th scope="col">#lp('status')</th><th scope="col">#lp('owner')</th><th scope="col">#lp('tags')</th></tr></thead>
+<tbody>
+#foreach($item in $articles)
+#set($article = $xwiki.getDocument($item))
+#if($article.hasAccessLevel('view'))
+#set($visible = true)
+#set($metadata = $article.getObject('LuxPedia.Code.ArticleClass'))
+#set($flow = $article.getObject('PublicationWorkflow.PublicationWorkflowClass'))
+#set($state = 'published')
+#if($flow)#set($state = $flow.getValue('status'))#end
+<tr><td><a href="$escapetool.xml($xwiki.getURL($item))">$escapetool.xml($article.displayTitle)</a></td><td>#lp($state)</td><td>$escapetool.xml($!metadata.getValue('owner'))</td><td>$escapetool.xml($!metadata.getValue('tagsText'))</td></tr>
+#end
+#end
+#if(!$visible)
+<tr><td colspan="4">#lp('empty')</td></tr>
+#end
+</tbody>
+</table>
+{{/html}}

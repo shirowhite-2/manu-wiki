@@ -17,48 +17,15 @@ V = '''{{velocity}}
 #macro(lp $key)$services.localization.render("luxpedia.$key")#end
 '''
 END = '\n{{/velocity}}'
-CATEGORY_LIST = '''
-#set($cats = $services.query.xwql("from doc.object(LuxPedia.Code.CategoryClass) as c where doc.name = 'WebHome' and doc.space like 'Knowledge.%' order by doc.title").execute())
-#if($cats.isEmpty())
-#lp('categoryEmpty')
-#else
-|=#lp('categories')|=#lp('description')
-#foreach($item in $cats)
-#set($category = $xwiki.getDocument($item))
-#if($category.hasAccessLevel('view'))
-|[[$category.displayTitle>>$item]]|$escapetool.xml($!category.getObject('LuxPedia.Code.CategoryClass').getValue('description'))
-#end
-#end
-#end
-'''
-ARTICLE_LIST = '''
-#set($articles = $services.query.xwql("from doc.object(LuxPedia.Code.ArticleClass) as article where (doc.space = 'Knowledge' or doc.space like 'Knowledge.%') order by doc.date desc").execute())
-|=#lp('title')|=#lp('status')|=#lp('owner')|=#lp('tags')
-#foreach($item in $articles)
-#set($article = $xwiki.getDocument($item))
-#if($article.hasAccessLevel('view'))
-#set($metadata = $article.getObject('LuxPedia.Code.ArticleClass'))
-#set($flow = $article.getObject('PublicationWorkflow.PublicationWorkflowClass'))
-#set($state = 'published')
-#if($flow)#set($state = $flow.getValue('status'))#end
-|[[$article.displayTitle>>$item]]|#lp($state)|$escapetool.xml($!metadata.getValue('owner'))|$escapetool.xml($!metadata.getValue('tagsText'))
-#end
-#end
-'''
+LEGACY_BRAND_TITLE = "#if($xcontext.action == 'login')登录 - LuxPedia#elseif($tdoc.fullName == 'Main.WebHome')LuxPedia - 企业知识库#else$tdoc.getRenderedTitle('plain/1.0') - LuxPedia#end"
+LEGACY_BRAND_FOOTER = 'LuxPedia · 企业知识库 · <a href="$xwiki.getURL(\'LuxPedia.About.WebHome\')">关于与开源声明</a>'
+BRAND_TITLE = "#if($xcontext.action == 'login')$services.localization.render('luxpedia.login') - LuxPedia#elseif($tdoc.fullName == 'Main.WebHome')$services.localization.render('luxpedia.home')#else$tdoc.getRenderedTitle('plain/1.0') - LuxPedia#end"
+BRAND_FOOTER = 'LuxPedia · $services.localization.render(\'luxpedia.brandTagline\') · <a href="$xwiki.getURL(\'LuxPedia.About.WebHome\')">$services.localization.render(\'luxpedia.about\')</a>'
+CATEGORY_LIST = (UI / 'pages/categories.xwiki').read_text()
+ARTICLE_LIST = (UI / 'pages/articles.xwiki').read_text()
+REVIEW_LIST = (UI / 'pages/review_queue.xwiki').read_text()
 PAGES = {
-    ("LuxPedia/Workflow", "ReviewQueue"): ("queue", V + '''= #lp('queue') =
-
-#lp('nextReview')
-
-#set($articles = $services.query.xwql("from doc.object(PublicationWorkflow.PublicationWorkflowClass) as wf where wf.istarget = 0 and wf.status = 'validating' and (doc.space = 'Drafts' or doc.space like 'Drafts.%') order by doc.date asc").execute())
-|=#lp('title')|=#lp('status')|=#lp('destination')
-#foreach($item in $articles)
-#set($draft = $xwiki.getDocument($item))
-#if($draft.hasAccessLevel('view'))
-|[[$draft.displayTitle>>$item]]|#lp('validating')|$escapetool.xml($draft.getObject('PublicationWorkflow.PublicationWorkflowClass').getValue('target'))
-#end
-#end
-''' + END),
+    ("LuxPedia/Workflow", "ReviewQueue"): ("queue", V + "= #lp('queue') =\n\n#lp('nextReview')\n\n" + REVIEW_LIST + END),
     ("Main", "WebHome"): ("home", V + '''= #lp('home') =
 
 #lp('homeIntro')
@@ -111,7 +78,7 @@ def apply(module, wiki):
         'default_language': 'en', 'multilingual': '1', 'languages': 'en,zh'})
     def translations(language):
         return '\n'.join('luxpedia.' + key + '=' + value.replace('\\', '\\\\').replace('\n', '\\n')
-                         for key, value in MESSAGES[language].items())
+                         for key, value in MESSAGES[language].items()) + '\n' + (UI / f'fields_{language}.properties').read_text()
     wiki.ensure_page('LuxPedia/Code', 'InterfaceTranslations', 'LuxPedia interface translations', translations('en'), hidden=True, update=True)
     wiki.ensure_object_values('LuxPedia/Code', 'InterfaceTranslations', 'XWiki.TranslationDocumentClass', {'scope': 'WIKI'})
     ensure_translation(wiki, 'LuxPedia/Code', 'InterfaceTranslations', 'zh', 'LuxPedia 界面翻译', translations('zh'))
@@ -121,16 +88,24 @@ def apply(module, wiki):
         raise RuntimeError('Publication Workflow must be installed before applying its interface translations')
     original = ET.fromstring(body)
     native = original.findtext('{http://www.xwiki.org}content') or ''
-    overrides = {'workflow.title': 'Publication', 'workflow.submitformoderation': 'Submit for review',
-                 'workflow.submitforvalidation': 'Submit for review', 'workflow.publish': 'Approve and publish',
-                 'workflow.refusevalidation': 'Return for changes', 'workflow.refusal.submit': 'Return for changes',
-                 'workflow.refusal.message': 'Describe the changes needed before this article can be published.',
-                 'workflow.alert.publish': 'Approve and publish this article? Readers will be able to see this version.'}
+    overrides = dict(line.split('=', 1) for line in (UI / 'workflow_en.properties').read_text().splitlines()
+                     if line and not line.startswith('#'))
     for key, value in overrides.items():
         native, count = re.subn(r'(?m)^' + re.escape(key) + r'\s*=.*$', key + '=' + value, native)
         if not count: native += '\n' + key + '=' + value
     wiki.ensure_page('PublicationWorkflow', 'Translations', 'Publication translations', native, hidden=True, update=True)
     ensure_translation(wiki, 'PublicationWorkflow', 'Translations', 'zh', '文章发布翻译', (UI / 'workflow_zh.properties').read_text())
+    # Migrate only the exact branding strings installed by our branding script.
+    for number in wiki.objects('XWiki', 'XWikiPreferences', 'XWiki.XWikiPreferences'):
+        current = wiki.object_values('XWiki', 'XWikiPreferences', 'XWiki.XWikiPreferences', number)
+        changes = {}
+        if current.get('title') == LEGACY_BRAND_TITLE:
+            changes['title'] = BRAND_TITLE
+        if current.get('version') == LEGACY_BRAND_FOOTER:
+            changes['version'] = BRAND_FOOTER
+        if changes:
+            wiki.ensure_object_values('XWiki', 'XWikiPreferences', 'XWiki.XWikiPreferences', changes)
+        break
     for (space, page), (key, content) in PAGES.items():
         content = content.replace('PublicationWorkflow.Overview', 'LuxPedia.Workflow.ReviewQueue')
         wiki.ensure_page(space, page, MESSAGES['en'][key], content, update=True)
@@ -178,7 +153,12 @@ def apply(module, wiki):
     if status == 200:
         template = ET.fromstring(body)
         content = template.findtext('{http://www.xwiki.org}content') or ''
-        if content.startswith(module.ARTICLE_META):
+        legacy_body = (UI / 'pages/article_zh.xwiki').read_text()
+        if content in (legacy_body, module.ARTICLE_META + legacy_body, (UI / 'pages/article_en.xwiki').read_text()):
+            wiki.ensure_page('LuxPedia/Templates', 'Article', 'Article template',
+                             (UI / 'pages/article_en.xwiki').read_text(), hidden=True, update=True)
+            ensure_translation(wiki, 'LuxPedia/Templates', 'Article', 'zh', '文章模板', legacy_body)
+        elif content.startswith(module.ARTICLE_META):
             wiki.ensure_page('LuxPedia/Templates', 'Article', 'Article template',
                              content[len(module.ARTICLE_META):], hidden=True, update=True)
     # These menu extensions render on every page and use XWiki's selected locale.

@@ -6,6 +6,7 @@ const { test, before, after } = require('node:test');
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 const http = require('node:http');
+const fs = require('node:fs');
 const { chromium } = require('playwright');
 
 const source = process.env.WORKFLOW_UX_SOURCE || path.join(__dirname, '../scripts/apply_workflow.py');
@@ -42,7 +43,8 @@ async function wikiFixture(options = {}) {
       <input name="workflowdoc" type="hidden" value="${reference}">
       ${fields}<input type="submit" value="Continue"></form>`;
   }
-  function html(edit) {
+  function html(edit, requestedLanguage) {
+    const nativeLanguage = requestedLanguage || options.serverLanguage || '';
     const start = form('start', `<input name="targetSpace" value="Drafts">
       <input name="targetName" value="WebHome">
       <input name="targetIsTerminal" type="checkbox">
@@ -52,7 +54,7 @@ async function wikiFixture(options = {}) {
     const workflow = !state.status ? start : state.status === 'draft' ? form('submitformoderation') :
       state.status === 'validating' ? form('publish') + form('validate') + form('refusevalidation') + form('archive') :
       state.status === 'published' ? form('getEditableDraft') + form('archive') + form('unpublish') : '';
-    return `<!doctype html><title>Local workflow test fixture — production theme not loaded</title><meta name="document" content="${reference}">
+    return `<!doctype html><html lang="${nativeLanguage}"><title>Local workflow test fixture — production theme not loaded</title><meta name="document" content="${reference}">
       ${options.navbar ? '<header id="headerglobal"><nav id="menuview"><ul class="navbar-right"><li id="original-menu">Original menu</li></ul></nav></header>' : ''}
       <p role="note">Local test fixture. The production LuxPedia theme is not loaded.</p>
       <div data-xwiki-form-token="test-token"></div>
@@ -126,7 +128,7 @@ async function wikiFixture(options = {}) {
       }
       throw new Error('Unexpected REST request: ' + pathname);
     }
-    return route.fulfill({ contentType: 'text/html', body: html(pathname === editPath) });
+    return route.fulfill({ contentType: 'text/html', body: html(pathname === editPath, url.searchParams.get('xwikilanguage')) });
   }
   // A real local server exercises native POST/303 navigations as well as REST.
   const server = http.createServer(async (request, response) => {
@@ -330,4 +332,52 @@ test('workflow controls inherit the host theme palette', async () => {
     assert.equal(await wiki.page.locator('#menuview .navbar-right > li#luxpedia-language').count(), 1);
     assert.equal(await wiki.page.locator('#original-menu').textContent(), 'Original menu');
   } finally { await wiki.context.close(); }
+});
+
+test('a stale Chinese server locale is reconciled with the English default', async () => {
+  const wiki = await wikiFixture({ serverLanguage: 'zh' });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/view/Drafts/NewArticle/WebHome');
+    await wiki.page.waitForURL(/xwikilanguage=en/);
+    assert.equal(await wiki.page.locator('html').getAttribute('lang'), 'en');
+    assert.equal(await wiki.page.locator('select[name="workflow"] option').textContent(), 'LuxPedia publication workflow');
+    assert.equal(wiki.state.errors.length, 0);
+  } finally { await wiki.context.close(); }
+});
+
+test('language switching in a creation form preserves entered text', async () => {
+  const wiki = await wikiFixture();
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/create/Drafts/WebHome');
+    await wiki.page.evaluate(() => {
+      const title = document.createElement('input'); title.id = 'new-page-title'; document.body.appendChild(title);
+    });
+    await wiki.page.fill('#new-page-title', 'My unsaved article title');
+    await wiki.page.selectOption('#luxpedia-language-select', 'zh');
+    assert.equal(await wiki.page.locator('#new-page-title').inputValue(), 'My unsaved article title');
+    assert.equal(new URL(wiki.page.url()).pathname, '/bin/create/Drafts/WebHome');
+    assert.equal(await wiki.page.locator('select[name="workflow"] option').textContent(), 'LuxPedia 文章发布流程');
+  } finally { await wiki.context.close(); }
+});
+
+test('rendered review queue keeps separate rows and fits desktop and mobile widths', async t => {
+  const fixture = path.join(__dirname, '../extensions/workflow-policy/target/review-queue-en.html');
+  if (!fs.existsSync(fixture)) {
+    t.skip('Run Maven tests first to generate the real Velocity rendering fixture.'); return;
+  }
+  const page = await browser.newPage();
+  try {
+    for (const width of [1280, 375]) {
+      await page.setViewportSize({ width, height: 800 });
+      await page.setContent(fs.readFileSync(fixture, 'utf8'));
+      const rows = page.locator('tbody tr');
+      assert.equal(await rows.count(), 2);
+      assert.equal(await rows.nth(0).locator('td').count(), 3);
+      const first = await rows.nth(0).boundingBox();
+      const second = await rows.nth(1).boundingBox();
+      assert(second.y >= first.y + first.height - 1);
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+      assert.deepEqual(await page.locator('th').allTextContents(), ['Title', 'Status', 'Publication location']);
+    }
+  } finally { await page.close(); }
 });

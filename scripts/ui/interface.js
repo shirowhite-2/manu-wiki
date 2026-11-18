@@ -7,7 +7,11 @@
   var saved;
   try { saved = localStorage.getItem(key); } catch (error) { /* storage is optional */ }
   var language = requested === 'zh' || requested === 'en' ? requested : saved === 'zh' ? 'zh' : 'en';
+  if (requested === 'zh' || requested === 'en') {
+    try { localStorage.setItem(key, language); } catch (error) { /* storage is optional */ }
+  }
   function t(name) { return messages[language][name] || messages.en[name] || name; }
+  function editing() { return /\/bin\/(?:edit|inline|create)\//.test(location.pathname); }
   window.LuxPediaI18n = { t: t, language: function () { return language; } };
   function update() {
     document.querySelectorAll('[data-luxpedia-i18n]').forEach(function (node) {
@@ -49,13 +53,26 @@
       document.dispatchEvent(new CustomEvent('luxpedia:languagechange'));
       var url = new URL(location.href);
       url.searchParams.set('xwikilanguage', language);
-      if (/\/bin\/edit\//.test(location.pathname)) {
+      if (editing()) {
         // Keep unsaved editor text. XWiki sets its locale cookie on this safe GET.
         notice.textContent = t('languageAfterSave');
         fetch('/bin/view/Main/?xwikilanguage=' + language, { credentials: 'same-origin', cache: 'no-store' });
       } else { location.assign(url.href); }
     });
     update();
+    // A saved browser preference and XWiki's locale cookie can disagree.
+    // Reconcile native menus on safe view pages, once, without losing form input.
+    var serverLanguage = (document.documentElement.lang || '').toLowerCase().replace('_', '-').split('-')[0];
+    if (!requested && serverLanguage && serverLanguage !== language) {
+      if (editing()) {
+        notice.textContent = t('languageAfterSave');
+        fetch('/bin/view/Main/?xwikilanguage=' + language, { credentials: 'same-origin', cache: 'no-store' });
+      } else {
+        var localized = new URL(location.href);
+        localized.searchParams.set('xwikilanguage', language);
+        location.replace(localized.href);
+      }
+    }
   }
   document.addEventListener('luxpedia:languagechange', update);
   if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', install); }
