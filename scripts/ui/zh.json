@@ -200,5 +200,9 @@
   "favoritesRemoved": "已取消收藏。",
   "favoritesConflict": "收藏已在其他位置更新，列表已刷新，请重试。",
   "favoritesError": "收藏操作未完成，请检查网络或联系管理员，刷新后重试。",
-  "favoritesRefreshFailed": "收藏已保存，请刷新页面查看最新列表。"
+  "favoritesRefreshFailed": "收藏已保存，请刷新页面查看最新列表。",
+  "favoritesPageUnavailable": "请先打开有查看权限且已保存的文章，再进行收藏。",
+  "favoritesLoading": "正在加载收藏状态，请稍候…",
+  "favoritesMenuAdd": "加入收藏",
+  "favoritesMenuRemove": "取消收藏"
 }

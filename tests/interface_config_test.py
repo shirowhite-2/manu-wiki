@@ -148,6 +148,16 @@ class InterfaceConfigTest(unittest.TestCase):
         self.assertIn("$request.getMethod() == 'POST'", favorites.ENDPOINT)
         self.assertIn("'form_token'", favorites.ENDPOINT)
         self.assertIn('private, no-store', favorites.ENDPOINT)
+        self.assertIn("sendRedirect($xwiki.getURL('Favorites.WebHome'))", wiki.pages[('LuxPedia/Favorites', 'WebHome')][1])
+        exclusions = wiki.object_data[('PanelsCode', 'NavigationConfiguration', 'PanelsCode.NavigationConfigurationClass')]['exclusions']
+        self.assertEqual(exclusions.split('|').count('LuxPedia.Favorites.WebHome'), 1)
+        self.assertEqual(exclusions.split('|').count('Favorites.WebHome'), 1)
+
+    def test_favorites_list_has_one_canonical_page_outside_the_help_center(self):
+        wiki = FakeWiki()
+        interface.apply(Module, wiki)
+        self.assertIn('luxpedia-favorites-page', wiki.pages[('Favorites', 'WebHome')][1])
+        self.assertNotIn(('LuxPedia/Favorites', 'WebHome'), interface.PAGES)
 
     def test_favorites_install_requires_the_native_schema_without_replacing_it(self):
         with self.assertRaisesRegex(RuntimeError, 'Favorites Application'):

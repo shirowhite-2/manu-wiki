@@ -200,5 +200,9 @@
   "favoritesRemoved": "Removed from your favorites.",
   "favoritesConflict": "Your favorites changed elsewhere. The list has been refreshed; try again.",
   "favoritesError": "Could not update favorites. Check your connection or contact an administrator, then refresh and try again.",
-  "favoritesRefreshFailed": "Your favorite was saved. Refresh the page to update the list."
+  "favoritesRefreshFailed": "Your favorite was saved. Refresh the page to update the list.",
+  "favoritesPageUnavailable": "Open an existing article you can view before adding it to favorites.",
+  "favoritesLoading": "Loading favorites. Please wait…",
+  "favoritesMenuAdd": "Add to favorites",
+  "favoritesMenuRemove": "Remove from favorites"
 }

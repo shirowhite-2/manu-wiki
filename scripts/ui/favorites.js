@@ -4,18 +4,34 @@
   window.LuxPediaFavorites = true;
   var t = window.LuxPediaI18n.t;
   var snapshot, busy = false, generation = 0, search = '', pageNumber = 1;
-  var current = document.querySelector('meta[name="document"]');
-  var reference = current ? current.content : '';
+  var reference = '';
   var notice, titleActions;
   var prefix = (location.pathname.split('/bin/')[0] || '');
+  function documentReference() {
+    var nativeReference = document.documentElement.getAttribute('data-xwiki-reference');
+    if (nativeReference) { return nativeReference; }
+    var meta = document.querySelector('meta[name="document"]');
+    if (meta && meta.content) { return meta.content; }
+    try {
+      if (window.XWiki && XWiki.currentDocument && XWiki.Model && typeof XWiki.Model.serialize === 'function') {
+        return XWiki.Model.serialize(XWiki.currentDocument.getDocumentReference());
+      }
+    } catch (error) { /* the page may still be initializing */ }
+    return '';
+  }
   function wikiURL(name, action, query) {
-    if (window.XWiki && XWiki.Model && XWiki.Document) {
-      return new XWiki.Document(XWiki.Model.resolve(name, XWiki.EntityType.DOCUMENT)).getURL(action, query);
+    try {
+      if (window.XWiki && typeof XWiki.Document === 'function') {
+        var parts = name.split('.'), page = parts.pop();
+        // Model.resolve parses relative names; it does not supply the wiki component required by Document.
+        return new XWiki.Document(page, parts.join('.'), XWiki.Document.currentWiki || XWiki.currentWiki).getURL(action, query);
+      }
+    } catch (error) {
+      // A partially initialized native model must not prevent binding the favorite controls.
     }
     return prefix + '/bin/' + action + '/' + name.replace(/\./g, '/') + (query ? '?' + query : '');
   }
-  var endpoint = wikiURL('LuxPedia.Workflow.Favorites', 'get', 'outputSyntax=plain');
-  var allURL = wikiURL('LuxPedia.Favorites.WebHome', 'view');
+  var endpoint, allURL;
 
   function text(tag, value) { var node = document.createElement(tag); node.textContent = value; return node; }
   function safeURL(value) {
@@ -38,7 +54,9 @@
     document.querySelectorAll('#addFavoriteMenu, #dropFavoriteMenu').forEach(function (link) {
       link.hidden = !snapshot || !snapshot.eligible;
       if (snapshot && snapshot.eligible) {
-        link.textContent = (snapshot.favorite ? '★ ' : '☆ ') + t(snapshot.favorite ? 'favoritesRemove' : 'favoritesAdd');
+        var action = t(snapshot.favorite ? 'favoritesMenuRemove' : 'favoritesMenuAdd');
+        link.textContent = (snapshot.favorite ? '★ ' : '☆ ') + action;
+        link.title = action;
         link.setAttribute('aria-disabled', String(busy));
       }
     });
@@ -139,6 +157,9 @@
 
   function boot() {
     if (!/\/bin\/(?:view|edit|inline)\//.test(location.pathname)) { return; }
+    reference = documentReference();
+    endpoint = wikiURL('LuxPedia.Workflow.Favorites', 'get', 'outputSyntax=plain');
+    allURL = wikiURL('Favorites.WebHome', 'view');
     var title = document.querySelector('#document-title h1, #document-title, h1.document-title');
     if (title) {
       titleActions = document.createElement('span'); titleActions.id = 'luxpedia-favorite-actions';
@@ -162,6 +183,7 @@
       if (!target) { return; }
       event.preventDefault(); event.stopImmediatePropagation();
       if (snapshot && snapshot.eligible) { change(reference, snapshot.favorite ? 'remove' : 'add'); }
+      else { report(snapshot ? 'favoritesPageUnavailable' : 'favoritesLoading'); }
     }, true);
     document.addEventListener('luxpedia:languagechange', render);
     document.addEventListener('xwiki:dom:updated', syncMenu);

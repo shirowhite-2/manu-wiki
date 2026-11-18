@@ -29,6 +29,7 @@ async function fixture(options = {}) {
       if (request.method === 'POST') {
         let body = ''; for await (const chunk of request) { body += chunk; }
         const fields = Object.fromEntries(new URLSearchParams(body)); state.writes.push({actor, fields});
+        const target = fields.reference.replace(/^xwiki:/, '');
         if (state.fail) { return json({status: 'unavailable'}, 500); }
         if (fields.form_token !== 'test-token') { return json({status: 'bad_token'}); }
         if (state.conflict) {
@@ -36,8 +37,8 @@ async function fixture(options = {}) {
           return json({status: 'conflict'});
         }
         if (fields.version !== state.versions[actor] + '.1') { return json({status: 'conflict'}); }
-        if (fields.operation === 'remove') { state.users[actor] = state.users[actor].filter(i => i.reference !== fields.reference); }
-        else if (!state.users[actor].some(i => i.reference === fields.reference)) { state.users[actor].push(item(1)); }
+        if (fields.operation === 'remove') { state.users[actor] = state.users[actor].filter(i => i.reference !== target); }
+        else if (!state.users[actor].some(i => i.reference === target)) { state.users[actor].push(item(1)); }
         state.versions[actor]++;
         return json({status: 'ok'});
       }
@@ -49,15 +50,30 @@ async function fixture(options = {}) {
       const pages = Math.max(1, Math.ceil(matches.length / 25));
       const page = Math.min(pages, Math.max(1, Number(url.searchParams.get('page')) || 1));
       return json({status: 'ok', authenticated: true, token: 'test-token', version: state.versions[actor] + '.1',
-        eligible: !options.full && options.eligible !== false,
+        eligible: !options.full && options.eligible !== false &&
+          (url.searchParams.get('reference') || '').replace(/^xwiki:/, '') === 'Knowledge.Article1',
         favorite: all.some(i => i.reference === 'Knowledge.Article1'), recent: all.slice(0, 5),
         items: matches.slice((page - 1) * 25, page * 25), total: matches.length, page, pages});
     }
     response.setHeader('Content-Type', 'text/html; charset=utf-8');
-    const reference = options.full ? 'LuxPedia.Favorites.WebHome' : 'Knowledge.Article1';
-    response.end(`<!doctype html><html lang="${options.language || 'en'}"><meta charset="utf-8">
-      <meta name="document" content="${reference}"><title>Local favorites fixture — production theme not loaded</title>
+    const reference = options.full ? 'Favorites.WebHome' : 'Knowledge.Article1';
+    const nativeModel = options.nativeModel ? `<script>
+      window.XWiki={EntityType:{DOCUMENT:2},currentWiki:'xwiki',Model:{
+        resolve:function(name){return {name:name,wiki:name.startsWith('xwiki:')?'xwiki':undefined};},
+        serialize:function(ref){return ref.name;}
+      },currentDocument:{getDocumentReference:function(){return {name:'xwiki:${reference}'};}},
+      Document:function(page,space,wiki){
+        if(typeof page !== 'string'){if(!page.wiki)throw new Error('Document requires a wiki reference');}
+        this.getURL=function(action,query){return '/bin/'+action+'/'+space.replace(/\\./g,'/')+'/'+
+          (page==='WebHome'?'':page)+(query?'?'+query:'');};
+      }};XWiki.Document.currentWiki='xwiki';
+      ${options.partialModel ? 'XWiki.Document=function(){throw new Error("native URL templates not ready");};' : ''}
+    </script>` : '';
+    response.end(`<!doctype html><html lang="${options.language || 'en'}" ${options.flamingo ? 'data-xwiki-reference="xwiki:' + reference + '"' : ''}><head><meta charset="utf-8">
+      ${nativeModel}${options.earlyScript ? '<script>' + script + '</script>' : ''}
+      ${!options.flamingo && !options.modelOnly ? '<meta name="document" content="' + reference + '">' : ''}<title>Local favorites fixture — production theme not loaded</title>
       <style>body{margin:12px}.btn{white-space:nowrap}</style>
+      </head><body>
       <p>Local HTTP fixture. Production theme is not loaded.</p>
       <div id="document-title"><h1>Article title</h1></div>
       <aside id="luxpedia-favorites-sidebar" hidden><h3 data-luxpedia-i18n="myFavorites"></h3>
@@ -66,7 +82,7 @@ async function fixture(options = {}) {
       ${options.full ? '<div id="luxpedia-favorites-page"><form id="luxpedia-favorites-search"><label for="luxpedia-favorites-query">Search</label><input id="luxpedia-favorites-query" maxlength="100"><button>Search</button></form><div class="luxpedia-favorites-results"></div></div>' : ''}
       <div id="user-body" contenteditable="true">Unsaved article content</div>
       <script>window.legacyCalls=0;document.addEventListener('click',function(e){if(e.target.closest('#addFavoriteMenu'))window.legacyCalls++;});</script>
-      <script>${script}</script>`);
+      ${!options.earlyScript ? '<script>' + script + '</script>' : ''}</body></html>`);
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = 'http://127.0.0.1:' + server.address().port;
@@ -77,7 +93,7 @@ async function fixture(options = {}) {
     await context.addCookies([{name:'actor',value:actor,url:origin}]);
     const page = await context.newPage(); page.on('pageerror', e => state.errors.push(e.message));
     await page.goto(origin + '/bin/' + (options.edit ? 'edit' : 'view') + '/' +
-      (options.full ? 'LuxPedia/Favorites/WebHome' : 'Knowledge/Article1') + '?xwikilanguage=' + (options.language || 'en'));
+      (options.full ? 'Favorites/WebHome' : 'Knowledge/Article1') + '?xwikilanguage=' + (options.language || 'en'));
     return page;
   }
   const page = await open();
@@ -115,11 +131,36 @@ test('the native dropdown uses the same POST state and prevents its old GET hand
     await f.page.getByRole('button', {name:'☆ Favorite', exact:true}).waitFor();
     await f.page.locator('#addFavoriteMenu').click();
     await f.page.getByRole('button', {name:'★ Favorited', exact:true}).waitFor();
-    assert.match(await f.page.locator('#addFavoriteMenu').innerText(), /Remove favorite/);
+    assert.match(await f.page.locator('#addFavoriteMenu').innerText(), /Remove from favorites/);
     assert.equal(await f.page.evaluate(() => window.legacyCalls), 0);
     assert.equal(f.state.writes.length, 1);
   } finally { await f.close(); }
 });
+
+for (const mode of [
+  {flamingo:true,nativeModel:true,earlyScript:true},
+  {nativeModel:true,earlyScript:true},
+  {nativeModel:true,modelOnly:true},
+  {flamingo:true,nativeModel:true,partialModel:true,earlyScript:true}
+]) {
+  test('native page information and early script loading still bind favorites '+JSON.stringify(mode),async()=>{
+    const f=await fixture(mode);
+    try{
+      const toggle=f.page.getByRole('button',{name:'☆ Favorite',exact:true});await toggle.waitFor();
+      assert.equal(new URL(f.state.reads[0].url,'http://fixture.test').searchParams.get('reference'),
+        mode.flamingo||mode.modelOnly?'xwiki:Knowledge.Article1':'Knowledge.Article1');
+      await f.page.locator('#addFavoriteMenu').click();
+      await f.page.getByRole('button',{name:'★ Favorited',exact:true}).waitFor();
+      assert.equal(await f.page.locator('#luxpedia-favorites-sidebar').isVisible(),true);
+      assert.equal(f.state.writes[0].fields.reference,mode.flamingo||mode.modelOnly?'xwiki:Knowledge.Article1':'Knowledge.Article1');
+      assert.match(await f.page.getByRole('link',{name:'View all favorites'}).getAttribute('href'),/\/Favorites\//);
+      assert.equal(await f.page.evaluate(()=>window.legacyCalls),0);
+      await f.page.getByRole('button',{name:'★ Favorited',exact:true}).click();
+      await f.page.getByRole('button',{name:'☆ Favorite',exact:true}).waitFor();
+      assert.equal(f.state.users.alice.length,0);
+    }finally{await f.close();}
+  });
+}
 
 test('each account has its own server-backed favorites', async () => {
   const f = await fixture({items:[item(1)]});
@@ -141,7 +182,7 @@ test('sidebar shows five recent favorites and links to the complete list', async
     await f.page.locator('#luxpedia-favorites-sidebar li').first().waitFor();
     assert.equal(await f.page.locator('#luxpedia-favorites-sidebar li').count(), 5);
     assert.equal(await f.page.locator('#luxpedia-favorites-sidebar li a').first().innerText(), 'Article 12');
-    assert.match(await f.page.getByRole('link', {name:'View all favorites'}).getAttribute('href'), /LuxPedia\/Favorites\/WebHome/);
+    assert.match(await f.page.getByRole('link', {name:'View all favorites'}).getAttribute('href'), /\/Favorites\//);
   } finally { await f.close(); }
 });
 

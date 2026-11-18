@@ -43,6 +43,11 @@ def apply(module, wiki):
     if not wiki.page_exists('Favorites/Code', 'FavoritesClass'):
         raise RuntimeError('Install Favorites Application 1.4.4 before configuring personal favorites.')
     wiki.ensure_page('LuxPedia/Workflow', 'Favorites', 'Personal favorites service', ENDPOINT, hidden=True, update=True)
+    redirect = "{{velocity}}\n#set($discard = $response.sendRedirect($xwiki.getURL('Favorites.WebHome')))\n{{/velocity}}"
+    wiki.ensure_page('LuxPedia/Favorites', 'WebHome', 'My favorites', redirect, hidden=True, update=True)
+    # A stored Chinese translation must redirect too, rather than display the old duplicate list.
+    from apply_interface import ensure_translation
+    ensure_translation(wiki, 'LuxPedia/Favorites', 'WebHome', 'zh', '我的收藏', redirect)
     # The original endpoint must not keep a second GET-based mutation path.
     wiki.ensure_page('Favorites/Code', 'AddRemoveFavoriteService', 'Personal favorites service', ENDPOINT, hidden=True, update=True)
     wiki.ensure_page('LuxPedia/Code', 'FavoritesScript', 'Personal favorites interface', '', hidden=True)
@@ -59,12 +64,21 @@ def apply(module, wiki):
     wiki.ensure_object_values('Panels', 'Navigation', cls, {
         'content': source.replace('#panelfooter()', NAVIGATION + '#panelfooter()', 1),
         'async_cached': '0', 'async_enabled': '0'})
+    navigation_class = 'PanelsCode.NavigationConfigurationClass'
+    wiki.ensure_page('PanelsCode', 'NavigationConfiguration', 'Navigation configuration', '', hidden=True)
+    configurations = wiki.objects('PanelsCode', 'NavigationConfiguration', navigation_class)
+    current = wiki.object_values('PanelsCode', 'NavigationConfiguration', navigation_class, configurations[0]) if configurations else {}
+    exclusions = [value for value in current.get('exclusions', '').split('|') if value]
+    for reference in ('LuxPedia.Favorites.WebHome', 'Favorites.WebHome'):
+        if reference not in exclusions:
+            exclusions.append(reference)
+    wiki.ensure_object_values('PanelsCode', 'NavigationConfiguration', navigation_class, {'exclusions': '|'.join(exclusions)})
     # The upstream panel renders titles without its own per-document VIEW check.
     # Retain a safe entry if it is configured in a custom layout; the new list applies VIEW on the server.
     if wiki.objects('Favorites/Code', 'FavoritesPanel', cls):
         wiki.ensure_object_values('Favorites/Code', 'FavoritesPanel', cls, {
             'content': "{{velocity}}\n#panelheader($services.localization.render('luxpedia.myFavorites'))\n"
-                       "[[$services.localization.render('luxpedia.favoritesViewAll')>>LuxPedia.Favorites.WebHome]]\n"
+                       "[[$services.localization.render('luxpedia.favoritesViewAll')>>Favorites.WebHome]]\n"
                        "#panelfooter()\n{{/velocity}}",
             'async_cached': '0', 'async_enabled': '0'})
     wiki.ensure_page('Favorites', 'WebPreferences', 'WebPreferences', '', hidden=True)
