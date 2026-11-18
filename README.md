@@ -37,6 +37,7 @@ python3 tests/sprint1_smoke.py
 - [当前角色、百科/编写区流程与部署](docs/roles-and-interface.md)
 - [默认翻译宏与中英文词条用法](docs/translation-macro.md)
 - [draw.io 分享链接与图表预览](docs/drawio.md)
+- [图片、视频与附件插入正文](docs/attachments-in-content.md)
 - [Word、视频与大批量资料迁入](docs/bulk-import.md)（含只读目录盘点、CSV 分批和存储规划）
 - [Sprint 1 角色、分类与文章结构](docs/sprint1.md)
 - [部署、启动、备份和恢复](docs/deployment.md)
