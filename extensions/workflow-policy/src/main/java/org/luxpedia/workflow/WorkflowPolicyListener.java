@@ -82,7 +82,9 @@ public class WorkflowPolicyListener implements EventListener
                 require(doc.getObject("XWiki.XWikiUsers") != null, "Your user account cannot be removed.");
                 for (List<ObjectDiff> changes : doc.getObjectDiff(old, doc, context)) {
                     for (ObjectDiff change : changes) {
-                        require(change.getXClassReference().equals(resolver.resolve("XWiki.XWikiUsers", ref)),
+                        require(change.getXClassReference().equals(resolver.resolve("XWiki.XWikiUsers", ref)) ||
+                            (PersonalFavorites.saving(doc, old, context) &&
+                            change.getXClassReference().equals(resolver.resolve(PersonalFavorites.CLASS, ref))),
                             "Profile security and configuration are administrator-managed.");
                     }
                 }
@@ -90,7 +92,7 @@ public class WorkflowPolicyListener implements EventListener
             if (!deleting && doc.getTranslation() == 0) { new IdentityDirectory(this, context).normalizeView(doc); }
             return;
         }
-        boolean protectedConfiguration = space.equals("LuxPedia") || space.equals("PublicationWorkflow") ||
+        boolean protectedConfiguration = space.equals("LuxPedia") || space.equals("PublicationWorkflow") || space.equals("Favorites") ||
             (space.equals("XWiki") && Set.of("LuxEditors", "LuxReviewers", "LuxReaders", "LuxManagers",
                 "XWikiPreferences", "XWikiAdminGroup", "XWikiAllGroup").contains(ref.getName()));
         if (!protectedConfiguration && !space.equals("Drafts") && !space.equals("Knowledge") &&
@@ -393,7 +395,7 @@ public class WorkflowPolicyListener implements EventListener
         new IdentityDirectory(this, context).initialize();
     }
 
-    public String getPolicyVersion() { return "luxpedia-workflow-policy-8"; }
+    public String getPolicyVersion() { return "luxpedia-workflow-policy-9"; }
     /** Deployment migration: remove historical validator EDIT grants without re-authoring content. */
     public int repairExistingDraftRights(XWikiContext context) throws Exception {
         require(authorization.hasAccess(Right.ADMIN, context.getUserReference(),

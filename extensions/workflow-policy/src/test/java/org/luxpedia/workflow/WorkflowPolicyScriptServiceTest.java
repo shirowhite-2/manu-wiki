@@ -32,7 +32,7 @@ class WorkflowPolicyScriptServiceTest {
         service.authorization = mock(AuthorizationManager.class);
         service.csrf = mock(CSRFToken.class);
         listener = mock(WorkflowPolicyListener.class); service.listener = listener;
-        when(listener.getPolicyVersion()).thenReturn("luxpedia-workflow-policy-8");
+        when(listener.getPolicyVersion()).thenReturn("luxpedia-workflow-policy-9");
         context = mock(XWikiContext.class); wiki = mock(XWiki.class); request = mock(XWikiRequest.class);
         when(context.getWiki()).thenReturn(wiki);
         when(context.getWikiId()).thenReturn("xwiki");
@@ -47,7 +47,7 @@ class WorkflowPolicyScriptServiceTest {
     }
 
     @Test void administratorCanCheckComponentWithoutProgrammingRights() {
-        assertEquals("luxpedia-workflow-policy-8", service.status());
+        assertEquals("luxpedia-workflow-policy-9", service.status());
         verify(service.authorization).hasAccess(eq(Right.ADMIN), any(),
             eq(new DocumentReference("xwiki", "XWiki", "XWikiPreferences")));
         verifyNoMoreInteractions(service.authorization);
@@ -61,6 +61,13 @@ class WorkflowPolicyScriptServiceTest {
     @Test void getRequestCannotInitialize() throws Exception {
         when(request.getMethod()).thenReturn("GET");
         assertEquals("POLICY_POST_REQUIRED", service.initialize("valid-token"));
+        verifyNoInteractions(wiki, listener);
+    }
+    @Test void favoriteMutationRequiresPostAndCsrfBeforeAnyStorageAccess() {
+        when(request.getMethod()).thenReturn("GET");
+        assertEquals("post_required", service.manageFavorite("Knowledge.A", "add", "2.1", "valid-token").get("status"));
+        when(request.getMethod()).thenReturn("POST");
+        assertEquals("bad_token", service.manageFavorite("Knowledge.A", "add", "2.1", "wrong").get("status"));
         verifyNoInteractions(wiki, listener);
     }
     @Test void missingOrInvalidTokenCannotInitialize() throws Exception {

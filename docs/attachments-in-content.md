@@ -33,7 +33,7 @@
 
 ## 更新已有实例
 
-保留已有 `LuxPedia.Code.VideoInsertScript` 扩展身份，以统一工具替换旧的视频工具。策略 8 实例更新当前分支后运行完整安装器即可，无需重建 JAR 或 Docker：
+保留已有 `LuxPedia.Code.VideoInsertScript` 扩展身份，以统一工具替换旧的视频工具。附件功能本身只更新界面；当前分支新增的收藏功能需要策略 9，从策略 8 更新时须按[个人收藏部署说明](personal-favorites.md)完整构建组件和镜像。已运行策略 9 的实例后续更新界面时，可直接执行安装器：
 
 ```bash
 NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \

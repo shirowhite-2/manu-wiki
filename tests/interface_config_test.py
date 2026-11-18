@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 import apply_interface as interface
 import apply_workflow_security as security
 import apply_workflow as workflow
+import apply_favorites as favorites
 from interface_assets import MESSAGES
 
 
@@ -66,7 +67,7 @@ class FakeWiki:
     def request(self, method, path, data=None, content_type=None, **kwargs):
         self.requests.append((method, path, data))
         if 'PolicyStatus?' in path:
-            return 200, b'luxpedia-workflow-policy-8' if self.policy else b'POLICY_NOT_INSTALLED'
+            return 200, b'luxpedia-workflow-policy-9' if self.policy else b'POLICY_NOT_INSTALLED'
         if 'PolicySetup?' in path:
             return 200, b'AUDIT_CLASS_READY'
         if '/translations/' in path:
@@ -132,6 +133,25 @@ class DraftHomeRightsWiki:
 
 
 class InterfaceConfigTest(unittest.TestCase):
+    def test_personal_favorites_reuses_native_storage_and_installs_navigation_idempotently(self):
+        wiki = FakeWiki()
+        wiki.existing_pages.add(('Favorites/Code', 'FavoritesClass'))
+        wiki.pages[('XWiki', 'alice')] = ('Private profile', 'Preserved profile')
+        favorites.apply(Module, wiki)
+        favorites.apply(Module, wiki)
+        nav = wiki.object_data[('Panels', 'Navigation', 'Panels.PanelClass')]
+        self.assertEqual(nav['content'].count('LUXPEDIA_PERSONAL_FAVORITES_START'), 1)
+        self.assertIn('{{documentTree /}}', nav['content'])
+        self.assertEqual(nav['async_cached'], '0')
+        self.assertEqual(wiki.pages[('XWiki', 'alice')], ('Private profile', 'Preserved profile'))
+        self.assertEqual(wiki.pages[('LuxPedia/Workflow', 'Favorites')][1], wiki.pages[('Favorites/Code', 'AddRemoveFavoriteService')][1])
+        self.assertIn("$request.getMethod() == 'POST'", favorites.ENDPOINT)
+        self.assertIn("'form_token'", favorites.ENDPOINT)
+        self.assertIn('private, no-store', favorites.ENDPOINT)
+
+    def test_favorites_install_requires_the_native_schema_without_replacing_it(self):
+        with self.assertRaisesRegex(RuntimeError, 'Favorites Application'):
+            favorites.apply(Module, FakeWiki())
     def test_editable_home_content_has_no_inline_script_and_preserves_approved_changes(self):
         wiki = FakeWiki()
         custom = {('Knowledge', 'WebHome'): ('Team encyclopedia', '= Approved introduction =\nTeam content'),

@@ -61,6 +61,26 @@ public class WorkflowPolicyScriptService implements ScriptService
         return administrator(context) ? ((WorkflowPolicyListener) listener).getPolicyVersion() : "POLICY_FORBIDDEN";
     }
 
+    public java.util.Map<String, Object> favorites(String name, String search, String page) {
+        try {
+            var result = new java.util.LinkedHashMap<>(new PersonalFavorites((WorkflowPolicyListener) listener, context())
+                .read(name, search, page));
+            if ("ok".equals(result.get("status"))) { result.put("token", csrf.getToken()); }
+            return result;
+        }
+        catch (Exception error) { return java.util.Map.of("status", "unavailable"); }
+    }
+
+    public java.util.Map<String, Object> manageFavorite(String name, String operation, String version, String token) {
+        XWikiContext context = context();
+        if (context.getRequest() == null || !"POST".equals(context.getRequest().getMethod())) {
+            return java.util.Map.of("status", "post_required");
+        }
+        if (!csrf.isTokenValid(token)) { return java.util.Map.of("status", "bad_token"); }
+        try { return new PersonalFavorites((WorkflowPolicyListener) listener, context).change(name, operation, version); }
+        catch (Exception error) { return java.util.Map.of("status", "unavailable"); }
+    }
+
     public String initialize(String token) throws Exception {
         XWikiContext context = context();
         if (!administrator(context)) { return "POLICY_FORBIDDEN"; }

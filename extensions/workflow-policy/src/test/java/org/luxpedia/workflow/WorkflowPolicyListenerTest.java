@@ -156,6 +156,21 @@ class WorkflowPolicyListenerTest {
             assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
         }
     }
+    @Test void onlyScopedPersonalFavoritesSavesCanChangeFavoritesObjectsOnTheActingProfile() throws Exception {
+        profile("currentUser"); changedClass(PersonalFavorites.CLASS);
+        assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
+        PersonalFavorites.SAVING.set(user);
+        try {
+            assertDoesNotThrow(() -> policy.check(doc, context, false));
+            changedClass("XWiki.XWikiRights");
+            assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
+            changedClass(PersonalFavorites.CLASS);
+            when(doc.getContent()).thenReturn("Unexpected body change");
+            assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
+            profile("someoneElse"); changedClass(PersonalFavorites.CLASS);
+            assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
+        } finally { PersonalFavorites.SAVING.remove(); }
+    }
     @Test void adminCreatedProfilesReceivePrivacyAndRoleGroupsCannotBeEditedByMembers() throws Exception {
         profile("newAccount"); when(old.isNew()).thenReturn(true);
         when(policy.authorization.hasAccess(eq(Right.ADMIN), any(), any())).thenReturn(true);

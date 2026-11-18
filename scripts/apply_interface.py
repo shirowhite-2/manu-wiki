@@ -14,6 +14,7 @@ import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from interface_assets import MESSAGES, UI
+from apply_favorites import PAGE as FAVORITES_PAGE
 
 V = '''{{velocity}}
 #macro(lp $key)$services.localization.render("luxpedia.$key")#end
@@ -31,6 +32,7 @@ LEGACY_REVIEW_REDIRECT = """{{velocity}}
 #set($discard = $response.sendRedirect($xwiki.getURL('LuxPedia.Workflow.ReviewQueue')))
 {{/velocity}}"""
 PAGES = {
+    ("LuxPedia/Favorites", "WebHome"): ("myFavorites", V + "= #lp('myFavorites') =\n\n" + FAVORITES_PAGE + END),
     ("LuxPedia/Workflow", "WebHome"): ("workflowCenter", V + "= #lp('workflowCenter') =\n\n[[#lp('queue')>>LuxPedia.Workflow.ReviewQueue]]\n" + END),
     ("LuxPedia/Workflow", "ReviewQueue"): ("queue", V + "= #lp('queue') =\n\n#lp('nextReview')\n\n" + REVIEW_LIST + END),
     ("Main", "WebHome"): ("home", V + '''= #lp('home') =
