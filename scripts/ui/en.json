@@ -16,7 +16,7 @@
   "nextReview": "The submitted version is locked. A reviewer can publish it or return it for changes.",
   "nextValid": "The article has been approved. A reviewer can now publish it.",
   "nextPublished": "Readers can see the published version. Open a draft to propose changes.",
-  "nextArchived": "This article is archived. Contact an administrator to restore it.",
+  "nextArchived": "This article is listed in Knowledge → Archive. An administrator can restore its published version.",
   "destination": "Publication location",
   "destinationPending": "Choose a category in the editor.",
   "queue": "Review queue",
@@ -29,7 +29,7 @@
   "openDraft": "Open draft for changes",
   "archive": "Archive article",
   "unpublish": "Remove published version",
-  "restore": "Restore publication",
+  "restore": "Restore visibility",
   "backToDraft": "Restore as draft",
   "chooseCategory": "Publish after approval to:",
   "categoryHint": "This choice applies after approval. Your submission stays in Drafts during review.",
@@ -148,5 +148,10 @@
   "abandonedDrafts": "Abandoned drafts",
   "abandonSelected": "Abandon selected drafts",
   "workspaceListHint": "Abandon your unsubmitted drafts in batches of up to 20. Shared drafts and drafts created before ownership tracking require an administrator. Withdraw pending review requests first.",
-  "workspaceSharedHint": "This draft is owned by someone else, has shared changes, or predates ownership tracking. An administrator can abandon it; you can continue editing or submit it."
+  "workspaceSharedHint": "This draft is owned by someone else, has shared changes, or predates ownership tracking. An administrator can abandon it; you can continue editing or submit it.",
+  "archiveCenter": "Archive",
+  "archiveIntro": "Find archived encyclopedia articles here. Open an article to view it or ask an administrator to restore its visibility.",
+  "archiveListHint": "Archived articles keep their original address and permissions. Existing documents stored in this category are also listed. Restoring an archived article shows its published version again.",
+  "originalLocation": "Original location",
+  "archiveEmpty": "No archived articles or documents stored in this category."
 }

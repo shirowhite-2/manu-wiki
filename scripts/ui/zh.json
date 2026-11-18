@@ -16,7 +16,7 @@
   "nextReview": "已提交的版本暂时锁定。审核人可以批准发布，或退回修改。",
   "nextValid": "文章已获批准，审核人可以继续发布。",
   "nextPublished": "读者现在可以阅读发布版。需要修改时，请打开草稿。",
-  "nextArchived": "文章已归档。如需恢复，请联系管理员。",
+  "nextArchived": "文章已列入“知识库 → 归档”，管理员可恢复正式版展示。",
   "destination": "发布位置",
   "destinationPending": "请在编辑器中选择发布分类。",
   "queue": "待审核列表",
@@ -29,7 +29,7 @@
   "openDraft": "打开草稿修改",
   "archive": "归档文章",
   "unpublish": "移除发布版",
-  "restore": "恢复发布",
+  "restore": "恢复展示",
   "backToDraft": "恢复为草稿",
   "chooseCategory": "审核通过后发布到：",
   "categoryHint": "分类将在审核通过后生效，审核期间文章保留在草稿区。",
@@ -148,5 +148,10 @@
   "abandonedDrafts": "已放弃",
   "abandonSelected": "放弃所选草稿",
   "workspaceListHint": "本人未送审的个人草稿每次最多可放弃 20 篇。多人参与过的草稿及启用归属记录前的旧草稿由管理员整理；待审核草稿需先撤回。",
-  "workspaceSharedHint": "此草稿由其他人负责、含多人修改或属于旧草稿，可请管理员放弃；你仍可继续编写或送审。"
+  "workspaceSharedHint": "此草稿由其他人负责、含多人修改或属于旧草稿，可请管理员放弃；你仍可继续编写或送审。",
+  "archiveCenter": "归档",
+  "archiveIntro": "在这里查找已归档的百科文章。可打开文章查看，或由管理员恢复展示。",
+  "archiveListHint": "已归档文章保留原地址和查看权限。本分类原有的资料也会列出。恢复展示后，文章的正式版会重新显示。",
+  "originalLocation": "原位置",
+  "archiveEmpty": "暂无已归档文章或本分类收录的资料。"
 }

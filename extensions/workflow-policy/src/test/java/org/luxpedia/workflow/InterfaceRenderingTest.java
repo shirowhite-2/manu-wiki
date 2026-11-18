@@ -38,6 +38,7 @@ class InterfaceRenderingTest {
         final List<String> items;
         Query(List<String> items) { this.items = items; }
         public Query xwql(String query) { return this; }
+        public Query addFilter(String filter) { return this; }
         public List<String> execute() { return items; }
     }
     public static class Fields {
@@ -55,7 +56,7 @@ class InterfaceRenderingTest {
             }
             return switch (field) {
                 case "target" -> "Knowledge.Technical." + "LongArticleName".repeat(30);
-                case "status" -> name.startsWith("Published ") ? "published" : name.startsWith("Archived ") ? "archived" : "validating";
+                case "status" -> name.startsWith("Published ") || name.startsWith("Restored") ? "published" : name.startsWith("Archived ") ? "archived" : "validating";
                 case "description" -> "User category <script>text</script>";
                 default -> "User value | <text>";
             };
@@ -64,16 +65,25 @@ class InterfaceRenderingTest {
     public static class Page {
         final String name;
         final boolean visible;
-        Page(String name, boolean visible) { this.name = name; this.visible = visible; }
+        final String mode;
+        Page(String name, boolean visible) { this(name, visible, ""); }
+        Page(String name, boolean visible, String mode) { this.name = name; this.visible = visible; this.mode = mode; }
         public boolean hasAccessLevel(String right) { return visible; }
         public String getDisplayTitle() { return name; }
-        public Fields getObject(String className) { return new Fields(name, className); }
+        public Fields getObject(String className) {
+            if (className.equals("LuxPedia.Code.CategoryClass") && !mode.equals("categories") && !name.startsWith("Category home")) { return null; }
+            if (className.equals("LuxPedia.Code.ArticleClass") && name.contains("Legacy")) { return null; }
+            return new Fields(name, className);
+        }
         public String getVersion() { return "4.2"; }
         public String getCreator() { return "XWiki.owner"; }
     }
     public static class Wiki {
+        final String mode;
+        Wiki() { this(""); }
+        Wiki(String mode) { this.mode = mode; }
         public Page getDocument(String reference) {
-            return new Page(reference.equals("Hidden") ? "SECRET TITLE" : reference + " <script> | 自定义标题", !reference.equals("Hidden"));
+            return new Page(reference.equals("Hidden") ? "SECRET TITLE" : reference + " <script> | 自定义标题", !reference.equals("Hidden"), mode);
         }
         public String getURL(String reference) { return "/bin/view/Drafts/" + reference + "?a=1&b=2"; }
     }
@@ -89,7 +99,7 @@ class InterfaceRenderingTest {
         var engine = new VelocityEngine(); engine.init();
         var context = new VelocityContext();
         context.put("services", Map.of("localization", new Localization(language), "query", new Query(items)));
-        context.put("xwiki", new Wiki()); context.put("escapetool", new Escape());
+        context.put("xwiki", new Wiki(name)); context.put("escapetool", new Escape());
         context.put("xcontext", Map.of("userReference", "xwiki:XWiki.owner", "user", "XWiki.owner"));
         context.put("request", new FilterRequest(view));
         var result = new StringWriter();
@@ -125,7 +135,7 @@ class InterfaceRenderingTest {
         context.setRoleType(ComponentManager.class); context.setRoleHint("context");
         manager.registerComponent(context, manager);
         Parser parser = manager.getInstance(Parser.class, "xwiki/2.1");
-        for (String name : List.of("review_queue", "categories", "articles", "drafts")) {
+        for (String name : List.of("review_queue", "categories", "articles", "drafts", "archive")) {
             var xdom = parser.parse(new StringReader(renderSource(name, "en", List.of("First", "Second"))));
             var macros = xdom.<MacroBlock>getBlocks(new ClassBlockMatcher(MacroBlock.class), Block.Axes.DESCENDANT);
             assertEquals(1, macros.size());
@@ -175,6 +185,39 @@ class InterfaceRenderingTest {
         assertFalse(table.getDocumentElement().getTextContent().contains("Archived"));
     }
 
+    @Test void archiveIndexIncludesArticlesWithoutArticleMetadataAndRespectsViewRightsInBothLanguages() throws Exception {
+        for (String language : List.of("en", "zh")) {
+            String html = render("archive", language, List.of("Archived Knowledge.Technical.Legacy", "Hidden"));
+            var table = parse(html);
+            assertEquals(2, table.getElementsByTagName("tr").getLength());
+            assertEquals(3, table.getElementsByTagName("td").getLength());
+            assertEquals(0, table.getElementsByTagName("script").getLength());
+            assertTrue(html.contains("Archived Knowledge.Technical.Legacy"));
+            assertFalse(html.contains("SECRET TITLE"));
+            assertTrue(html.contains(language.equals("en") ? "Original location" : "原位置"));
+            assertTrue(html.contains(language.equals("en") ? "Archived" : "已归档"));
+        }
+        String source = Files.readString(UI.resolve("pages/archive.xwiki"));
+        assertTrue(source.contains("wf.istarget = 1"));
+        assertTrue(source.contains("wf.status = 'archived'"));
+        assertTrue(source.contains("doc.fullName <> 'Knowledge.Archive.WebHome'"));
+        assertFalse(source.contains("doc.object(LuxPedia.Code.ArticleClass)"));
+        var statement = source.substring(source.indexOf("xwql(\"") + 6, source.indexOf("\").addFilter"));
+        new org.xwiki.query.jpql.internal.JPQLParser().parse("select doc.fullName from Document doc, " + statement.substring(5));
+    }
+    @Test void restoredArticlesReturnToActiveListsWhileArchivedArticlesLeaveThem() throws Exception {
+        var items = List.of("Restored Legacy", "Archived Knowledge.Technical.Old", "Category home", "Hidden");
+        String html = render("articles", "en", items);
+        assertTrue(html.contains("Restored Legacy"));
+        assertTrue(html.contains("Published"));
+        assertFalse(html.contains("Category home"));
+        assertFalse(html.contains("Archived Knowledge.Technical.Old"));
+        assertFalse(html.contains("SECRET TITLE"));
+        assertEquals(2, parse(html).getElementsByTagName("tr").getLength());
+        String source = Files.readString(UI.resolve("pages/articles.xwiki"));
+        String statement = source.substring(source.indexOf("xwql(\"") + 6, source.indexOf("\").addFilter"));
+        new org.xwiki.query.jpql.internal.JPQLParser().parse("select doc.fullName from Document doc, " + statement.substring(5));
+    }
     public static class FilterRequest {
         final String view;
         FilterRequest(String view) { this.view = view; }

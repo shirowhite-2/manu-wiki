@@ -26,6 +26,7 @@ BRAND_FOOTER = 'LuxPedia · $services.localization.render(\'luxpedia.brandTaglin
 CATEGORY_LIST = (UI / 'pages/categories.xwiki').read_text()
 ARTICLE_LIST = (UI / 'pages/articles.xwiki').read_text()
 REVIEW_LIST = (UI / 'pages/review_queue.xwiki').read_text()
+ARCHIVE_LIST = (UI / 'pages/archive.xwiki').read_text()
 LEGACY_REVIEW_REDIRECT = """{{velocity}}
 #set($discard = $response.sendRedirect($xwiki.getURL('LuxPedia.Workflow.ReviewQueue')))
 {{/velocity}}"""
@@ -148,7 +149,8 @@ def apply(module, wiki):
             wiki.ensure_object_values('XWiki', 'XWikiPreferences', 'XWiki.XWikiPreferences', changes)
         break
     for renderer, content in [('CategoryList', V + CATEGORY_LIST + END), ('ArticleList', V + ARTICLE_LIST + END),
-                              ('DraftList', V + (UI / 'pages/drafts.xwiki').read_text() + END), ('DraftTools', DRAFT_TOOLS)]:
+                              ('DraftList', V + (UI / 'pages/drafts.xwiki').read_text() + END), ('DraftTools', DRAFT_TOOLS),
+                              ('ArchiveList', V + ARCHIVE_LIST + END)]:
         wiki.ensure_page('LuxPedia/Code', renderer, renderer, content, hidden=True, update=True)
     for (space, page), (key, content) in PAGES.items():
         if (space, page) in EDITABLE_PAGES:
@@ -196,8 +198,10 @@ def apply(module, wiki):
     category_template = V + ARTICLE_LIST.replace("(doc.space = 'Knowledge' or doc.space like 'Knowledge.%')", "doc.space = :categorySpace")
     category_template = category_template.replace(').execute()', ").bindValue('categorySpace', $catSpace).execute()", 1)
     category_context = "#set($categoryRef = $doc.fullName)\n#set($flow = $doc.getObject('PublicationWorkflow.PublicationWorkflowClass'))\n#if($categoryRef.startsWith('Drafts.') && $flow)#set($categoryRef = $flow.getValue('target'))#end\n#set($catSpace = $categoryRef.replace('.WebHome', ''))\n"
-    category_template = category_template.replace('#set($articles', category_context + '#set($articles', 1) + END
+    category_template = V + category_context + '#if($catSpace == \'Knowledge.Archive\')\n{{include reference="LuxPedia.Code.ArchiveList" author="target"/}}\n#else\n' + category_template[len(V):] + '\n#end' + END
     wiki.ensure_page('LuxPedia/Code', 'CategoryHomeTemplate', 'Category article list', category_template, hidden=True, update=True)
+    from archive_interface import apply as apply_archive
+    apply_archive(module, wiki, ensure_translation)
     # Directory page bodies use server localization; localize native page titles too.
     for space, key in [('XWiki', 'xwikiAdmin'), ('XWiki/Users', 'users')] + [
             ('XWiki/Users/' + role.capitalize(), 'role.' + role)

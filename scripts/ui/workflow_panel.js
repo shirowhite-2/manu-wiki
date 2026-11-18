@@ -58,7 +58,7 @@
         summary.setAttribute('aria-live', 'polite');
         summary.innerHTML = '<strong class="luxpedia-state label label-default"></strong><ol class="luxpedia-steps">' +
           '<li></li><li></li><li></li></ol><p class="luxpedia-next"></p>' +
-          '<dl><dt></dt><dd></dd></dl><a class="luxpedia-review-queue" href="/bin/view/LuxPedia/Workflow/ReviewQueue"></a>';
+          '<dl><dt></dt><dd></dd></dl><a class="luxpedia-review-queue" href="/bin/view/LuxPedia/Workflow/ReviewQueue"></a> · <a class="luxpedia-archive-link" href="/bin/view/Knowledge/Archive/"></a>';
         panel.insertBefore(summary, panel.firstChild);
       }
       if (!panelRequested) {
@@ -90,6 +90,7 @@
       if (parts.length > 2 && parts[parts.length - 1] === 'WebHome') { parts.pop(); }
       text(summary.querySelector('dd'), target ? parts.join(' / ') : t('destinationPending'));
       text(summary.querySelector('.luxpedia-review-queue'), t('queue'));
+      text(summary.querySelector('.luxpedia-archive-link'), t('archiveCenter'));
       // The summary replaces the extension's technical status sentence.
       panel.querySelectorAll(':scope > p').forEach(function (node) { node.hidden = true; });
     });

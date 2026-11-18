@@ -111,7 +111,7 @@
     }
     var abandoned = draft && workspaceSnapshot.abandoned === true;
     var state = draftActionsSnapshot.status;
-    if (knowledge && state === 'unstarted') { return; }
+    if (knowledge && ['unstarted', 'archived'].includes(state)) { return; }
     if (draft && sessionStorage.getItem(EDIT_TARGET) &&
         sessionStorage.getItem(EDIT_TARGET) === draftActionsSnapshot.target.replace(/^xwiki:/, '')) {
       sessionStorage.removeItem(EDIT_TARGET);

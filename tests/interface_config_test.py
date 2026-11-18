@@ -91,6 +91,8 @@ class FakeWiki:
 
 
 class Module:
+    CATEGORIES = workflow.load_apply_module().CATEGORIES
+    ARTICLE_TABLE = workflow.load_apply_module().ARTICLE_TABLE
     ARTICLE_META = workflow.load_apply_module().ARTICLE_META
     CATEGORY_ADMIN = (ROOT / 'scripts/apply_sprint1.py').read_text().split('CATEGORY_ADMIN = """', 1)[1].split('"""', 1)[0]
     SOURCE_EDIT_UIX = '{{velocity}}源码编辑{{/velocity}}'
@@ -325,6 +327,65 @@ class InterfaceConfigTest(unittest.TestCase):
         self.assertFalse(any(rule.get('allow') == '1' and 'delete' in rule.get('levels', '')
                              for space, page, rule in wiki.rights if rule.get('groups') == 'XWiki.LuxEditors'))
 
+    def test_existing_archive_category_gets_an_idempotent_index_without_moving_articles(self):
+        wiki = FakeWiki()
+        source = '= 归档 =\n\n历史资料与过期文档\n\n' + Module.ARTICLE_TABLE.replace('__SPACE__', 'Knowledge.Archive')
+        wiki.pages[('Knowledge/Archive', 'WebHome')] = ('归档', source)
+        key = ('Knowledge/Archive', 'WebHome', 'LuxPedia.Code.CategoryClass')
+        original_category = {'name': '归档', 'owner': 'XWiki.TeamOwner', 'description': 'Original category description'}
+        wiki.object_data[key] = dict(original_category)
+        interface.apply(Module, wiki)
+        interface.apply(Module, wiki)
+        title, body = wiki.pages[('Knowledge/Archive', 'WebHome')]
+        self.assertEqual(title, 'Archive')
+        self.assertEqual(body.count('reference="LuxPedia.Code.ArchiveList"'), 1)
+        self.assertIn('author="target"', body)
+        self.assertNotIn('{{velocity}}', body)
+        self.assertEqual(wiki.object_data[key], original_category)
+        self.assertIn("wf.status = 'archived'", wiki.pages[('LuxPedia/Code', 'ArchiveList')][1])
+        self.assertIn('wf.istarget = 1', wiki.pages[('LuxPedia/Code', 'ArchiveList')][1])
+        self.assertIn("$catSpace == 'Knowledge.Archive'", wiki.pages[('LuxPedia/Code', 'CategoryHomeTemplate')][1])
+        self.assertFalse(any(method == 'DELETE' for method, path, data in wiki.requests))
+        self.assertFalse(any('/move' in path or '/rename' in path for method, path, data in wiki.requests))
+
+    def test_custom_archive_content_and_title_are_preserved_while_adding_the_renderer(self):
+        wiki = FakeWiki()
+        custom = '= Team archive =\n\nKeep this approved description and [[manual>>Knowledge.Manual]].'
+        wiki.pages[('Knowledge/Archive', 'WebHome')] = ('Team historical records', custom)
+        interface.apply(Module, wiki)
+        interface.apply(Module, wiki)
+        title, body = wiki.pages[('Knowledge/Archive', 'WebHome')]
+        self.assertEqual(title, 'Team historical records')
+        self.assertIn(custom, body)
+        self.assertEqual(body.count('reference="LuxPedia.Code.ArchiveList"'), 1)
+        self.assertFalse(any(method == 'PUT' and '/spaces/Archive/' in path for method, path, data in wiki.requests))
+
+    def test_archive_keeps_custom_chinese_translation_and_adds_its_renderer_only_once(self):
+        class TranslatedWiki(FakeWiki):
+            def __init__(self):
+                super().__init__()
+                self.translation = '<page xmlns="http://www.xwiki.org"><title>团队旧档</title><content>请保留这段中文说明。</content></page>'.encode()
+
+            def request(self, method, path, data=None, content_type=None, **kwargs):
+                expected = self.page_path('Knowledge/Archive', 'WebHome') + '/translations/zh'
+                if path == expected:
+                    self.requests.append((method, path, data))
+                    if method == 'GET': return 200, self.translation
+                    if method == 'PUT':
+                        self.translation = data.encode()
+                        return 201, b''
+                return super().request(method, path, data, content_type, **kwargs)
+        wiki = TranslatedWiki()
+        interface.apply(Module, wiki)
+        interface.apply(Module, wiki)
+        document = ET.fromstring(wiki.translation)
+        self.assertEqual(document.findtext('{http://www.xwiki.org}title'), '团队旧档')
+        body = document.findtext('{http://www.xwiki.org}content')
+        self.assertIn('请保留这段中文说明。', body)
+        self.assertEqual(body.count('reference="LuxPedia.Code.ArchiveList"'), 1)
+        self.assertEqual(len([1 for method, path, data in wiki.requests
+                              if method == 'PUT' and '/spaces/Archive/' in path]), 1)
+
     def test_language_catalogs_match_and_default_is_english(self):
         self.assertEqual(MESSAGES['en'].keys(), MESSAGES['zh'].keys())
         wiki = FakeWiki()
@@ -340,6 +401,7 @@ class InterfaceConfigTest(unittest.TestCase):
             ('PublicationWorkflow', 'Overview'), ('Knowledge', 'CategoryAdmin'),
             ('LuxPedia/Code', 'CategoryHomeTemplate'), ('LuxPedia/Code', 'InterfaceTranslations'),
             ('LuxPedia/Code', 'CategoryList'), ('LuxPedia/Code', 'ArticleList'),
+            ('LuxPedia/Code', 'ArchiveList'), ('Knowledge/Archive', 'WebHome'),
             ('LuxPedia/Code', 'DraftList'), ('LuxPedia/Code', 'DraftTools'),
             ('LuxPedia', 'HelpPanel'), ('LuxPedia/Code', 'SourceEditUIX'), ('LuxPedia/Code', 'EditGuideUIX')}
         allowed |= {('XWiki', 'WebHome'), ('XWiki/Users', 'WebHome')}

@@ -61,7 +61,8 @@ async function wikiFixture(options = {}) {
       state.status === 'validating' ? form('publish') + form('validate') + form('refusevalidation') + form('archive') :
       state.status === 'published' ? (options.existingDraftState ?
         `<form method="get" action="${linkedDraftPath}"><input type="submit" value="Go to draft"></form>` :
-        options.noDraftForm ? '' : form('getEditableDraft')) + form('archive') + form('unpublish') : '';
+        options.noDraftForm ? '' : form('getEditableDraft')) + form('archive') + form('unpublish') :
+      state.status === 'archived' ? form('publishfromarchive') + form('backtodraft') : '';
     return `<!doctype html><html lang="${nativeLanguage}"><title>Local workflow test fixture — production theme not loaded</title><meta name="document" content="${reference}">
       ${options.navbar ? '<header id="headerglobal"><nav id="menuview"><ul class="navbar-right"><li id="original-menu">Original menu</li></ul></nav></header>' : ''}
       <p role="note">Local test fixture. The production LuxPedia theme is not loaded.</p>
@@ -127,6 +128,8 @@ async function wikiFixture(options = {}) {
       } else if (fields.action === 'submitformoderation') {
         assert.equal(state.status, 'draft');
         state.status = 'validating'; // two-role config has no moderator
+      } else if (fields.action === 'publishfromarchive') {
+        state.status = 'published';
       } else if (fields.action === 'getEditableDraft') {
         reference = options.draftReference || 'Drafts.Linked.Article';
         viewPath = '/bin/view/' + reference.split('.').join('/');
@@ -662,6 +665,41 @@ test('a bulk abandonment reports partial failures and keeps independent versione
     assert.ok(wiki.state.workspaceActions.every(action => action.version === '4.2' && action.form_token === 'test-token'));
     assert.match(wiki.state.alerts[0], /1 drafts could not be abandoned/);
     assert.deepEqual(wiki.state.errors, []);
+  } finally { await wiki.context.close(); }
+});
+
+test('archived articles link to the Archive category and admin restoration keeps the original target', async () => {
+  const target = 'Knowledge.Technical.ArchivedArticle';
+  const wiki = await wikiFixture({ reference: target, status: 'archived', linkedTarget: target, admin: true });
+  try {
+    const original = wiki.origin + '/bin/view/Knowledge/Technical/ArchivedArticle';
+    await wiki.page.goto(original);
+    await wiki.page.waitForFunction(() => document.querySelector('.luxpedia-state')?.textContent === 'Archived');
+    assert.equal(await wiki.page.locator('.luxpedia-archive-link').getAttribute('href'), '/bin/view/Knowledge/Archive/');
+    const restore = wiki.page.locator('form').filter({ has: wiki.page.locator('input[name="action"][value="publishfromarchive"]') });
+    await restore.locator('input[type="submit"]').waitFor();
+    assert.equal(await restore.locator('input[type="submit"]').inputValue(), 'Restore visibility');
+    await restore.locator('input[type="submit"]').click();
+    await wiki.page.waitForFunction(() => document.querySelector('.luxpedia-state')?.textContent === 'Published');
+    assert.equal(new URL(wiki.page.url()).pathname, new URL(original).pathname);
+    assert.equal(wiki.state.target, target);
+    assert.deepEqual(wiki.state.actions.map(action => action.action), ['publishfromarchive']);
+    assert.equal(await wiki.page.locator('#user-content').textContent(), '用户撰写的正文 stays unchanged.');
+    assert.deepEqual(wiki.state.errors, []);
+  } finally { await wiki.context.close(); }
+});
+
+test('an editor can read an archived article without edit or restore actions', async () => {
+  const target = 'Knowledge.Technical.ArchivedArticle';
+  const wiki = await wikiFixture({ reference: target, status: 'archived', linkedTarget: target, nativeEdit: true });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/view/Knowledge/Technical/ArchivedArticle');
+    await wiki.page.waitForFunction(() => document.querySelector('.luxpedia-state')?.textContent === 'Archived');
+    assert.equal(await wiki.page.locator('#luxpedia-edit-article').count(), 0);
+    assert.equal(await wiki.page.locator('#tmEdit').isVisible(), false);
+    assert.equal(await wiki.page.locator('input[name="action"][value="publishfromarchive"]').locator('..').isVisible(), false);
+    assert.equal(await wiki.page.locator('.luxpedia-archive-link').textContent(), 'Archive');
+    assert.deepEqual(wiki.state.actions, []);
   } finally { await wiki.context.close(); }
 });
 
