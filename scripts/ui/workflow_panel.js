@@ -2,10 +2,45 @@
   var panelRequested = false;
   var metadataSnapshot = null;
   var metadataRequested = false;
+  var templateAdminRolesRequested = false;
+  function installTemplateAdminEntries() {
+    if (!uiRoles && !templateAdminRolesRequested) {
+      templateAdminRolesRequested = true;
+      currentRoles().then(function (roles) { uiRoles = roles; installTemplateAdminEntries(); })
+        .catch(function () { /* Never expose admin shortcuts when role lookup fails. */ });
+    }
+    var entry = document.getElementById('luxpedia-template-admin');
+    if (!uiRoles || uiRoles.admin !== true) {
+      if (entry) { entry.remove(); }
+      return;
+    }
+    var navigation = document.querySelector('#menuview .navbar-right, #headerglobal .navbar-right');
+    var header = document.querySelector('#headerglobal, #header');
+    if (!entry || navigation && entry.parentNode !== navigation) {
+      if (entry) { entry.remove(); }
+      entry = document.createElement(navigation && navigation.tagName === 'UL' ? 'li' : 'div');
+      entry.id = 'luxpedia-template-admin'; entry.className = navigation ? 'navbar-form' : 'form-inline text-right';
+      var create = document.createElement('a'); create.id = 'luxpedia-create-article-template';
+      create.className = 'btn btn-default btn-sm';
+      create.href = '/bin/create/LuxPedia/Templates/WebHome?spaceReference=LuxPedia.Templates&parent=LuxPedia.Templates.WebHome&template=LuxPedia.Code.ArticleTemplateSeed&tocreate=terminal';
+      create.dataset.luxpediaI18n = 'createArticleTemplateNav';
+      var center = document.createElement('a'); center.id = 'luxpedia-open-template-center';
+      center.className = 'btn btn-link btn-sm'; center.href = '/bin/view/LuxPedia/Templates/';
+      center.dataset.luxpediaI18n = 'templateCenter';
+      entry.appendChild(create); entry.appendChild(document.createTextNode(' ')); entry.appendChild(center);
+      var language = document.getElementById('luxpedia-language');
+      if (navigation) { navigation.insertBefore(entry, language && language.parentNode === navigation ? language : null); }
+      else if (header) { header.appendChild(entry); }
+      else { document.body.insertBefore(entry, document.body.firstChild); }
+    }
+    text(entry.querySelector('#luxpedia-create-article-template'), t('createArticleTemplateNav'));
+    text(entry.querySelector('#luxpedia-open-template-center'), t('templateCenter'));
+  }
   function text(node, value) {
     if (node && node.textContent !== value) { node.textContent = value; }
   }
   function translateWorkflowUI() {
+    installTemplateAdminEntries();
     reuseNativeCategoryField();
     refreshCategoryTree();
     bindDraftWorkspaceList();

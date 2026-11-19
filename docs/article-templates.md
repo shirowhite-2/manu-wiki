@@ -1,6 +1,8 @@
 # 管理文章模板
 
-管理员首页和左侧管理员导航新增 **Article templates / 文章模板**，统一进入 `LuxPedia.Templates.WebHome`。本地地址为 `http://127.0.0.1:8081/bin/view/LuxPedia/Templates/`。
+管理员可在顶部导航直接点击 **Create article template / 创建文章模板**，使用原生创建流程；旁边的 **Article templates / 文章模板** 打开集中管理页面。顶部入口仅在服务端角色接口确认当前账号为管理员后显示，兼容 Flamingo 的原生页面标识及延迟加载的导航栏。
+
+原生 **Administration → Content → Article templates / 管理 → 内容 → 文章模板** 也已注册为正式管理菜单；管理员首页和左侧管理导航继续提供入口。所有管理入口使用同一个 `LuxPedia.Templates.WebHome`。本地管理菜单地址为 `http://127.0.0.1:8081/bin/admin/XWiki/XWikiPreferences?editor=globaladmin&section=LuxPediaTemplates`，独立中心地址为 `http://127.0.0.1:8081/bin/view/LuxPedia/Templates/`。
 
 模板中心按位置列出 `LuxPedia/Templates` 及其子目录中的模板正文，并显示关联配置、编辑正文、模板设置或注册入口。中心本身只允许 Wiki 级管理员查看；模板正文和提供者仍允许业务角色读取，编辑与配置由现有 LuxPedia 空间权限及服务端策略限制为管理员。该入口没有扩大普通角色在其他空间创建模板的权限，也没有新增全站模板配置拦截。
 

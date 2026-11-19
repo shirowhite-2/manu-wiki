@@ -3,6 +3,7 @@
   "templateCenter": "Article templates",
   "templateCenterIntro": "Create and maintain shared article templates here. New templates are stored under LuxPedia / Templates. Administration access is required.",
   "createArticleTemplate": "Create template",
+  "createArticleTemplateNav": "Create article template",
   "systemTemplates": "All system template providers",
   "templateCreateStep": "Create a template, keep its location under LuxPedia / Templates, edit the starting content and save. Then return to this template center.",
   "templateRegisterStep": "Choose Register template on the saved page's row. The native settings form links the new provider to that template; verify Template to use before saving.",

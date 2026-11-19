@@ -455,6 +455,15 @@ class InterfaceConfigTest(unittest.TestCase):
         self.assertIn("hasAccess('admin'", center)
         acl = wiki.object_data[('LuxPedia/Templates', 'WebHome', 'XWiki.XWikiRights')]
         self.assertEqual(acl, {'groups': 'XWiki.LuxManagers,XWiki.XWikiAdminGroup', 'levels': 'view', 'allow': '1'})
+        registration = wiki.object_data[('LuxPedia/Templates', 'WebHome', 'XWiki.ConfigurableClass')]
+        self.assertEqual(registration['displayInCategory'], 'content')
+        self.assertEqual(registration['displayInSection'], 'LuxPediaTemplates')
+        self.assertEqual(registration['scope'], 'WIKI')
+        self.assertEqual(registration['configurationClass'], '')
+        self.assertEqual(registration['codeToExecute'],
+                         '{{include reference="LuxPedia.Templates.WebHome" context="new"/}}')
+        translations = wiki.pages[('LuxPedia/Code', 'InterfaceTranslations')][1]
+        self.assertIn('admin.luxpediatemplates=Article templates', translations)
         self.assertNotIn(('LuxPedia/Templates', 'WebPreferences'), wiki.pages)
         self.assertNotIn(('LuxPedia/Templates', 'Article', 'XWiki.XWikiRights'), wiki.object_data)
         self.assertIn('LuxPedia.Templates.WebHome', wiki.pages[('XWiki', 'WebHome')][1])

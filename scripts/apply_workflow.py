@@ -72,7 +72,8 @@ WORKFLOW_UX_JS = r"""(function () {
 
   function documentReference() {
     var meta = document.querySelector('meta[name="document"]');
-    return meta ? meta.content : '';
+    var native = document.documentElement.getAttribute('data-xwiki-reference') || '';
+    return meta && meta.content || native.replace(/^xwiki:/, '');
   }
 
   function currentUser() {

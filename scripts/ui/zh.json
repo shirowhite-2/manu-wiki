@@ -3,6 +3,7 @@
   "templateCenter": "文章模板",
   "templateCenterIntro": "在这里集中创建和维护共用文章模板。新增模板统一存放在 LuxPedia / Templates 下，仅管理员可管理。",
   "createArticleTemplate": "创建模板",
+  "createArticleTemplateNav": "创建文章模板",
   "systemTemplates": "全部系统模板配置",
   "templateCreateStep": "点击创建模板，保留位置为 LuxPedia / Templates，编写初始正文并保存，然后返回此模板中心。",
   "templateRegisterStep": "在已保存模板的对应行点击“注册模板”，原生配置表单会关联该模板；保存前请核对“使用的模板”。",

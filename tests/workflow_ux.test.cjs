@@ -83,7 +83,7 @@ async function wikiFixture(options = {}) {
         `<form method="get" action="${linkedDraftPath}"><input type="submit" value="Go to draft"></form>` :
         options.noDraftForm ? '' : form('getEditableDraft')) + form('archive') + form('unpublish') :
       state.status === 'archived' ? form('publishfromarchive') + form('backtodraft') : '';
-    return `<!doctype html><html lang="${nativeLanguage}"><title>Local workflow test fixture — production theme not loaded</title><meta name="document" content="${reference}">
+    return `<!doctype html><html lang="${nativeLanguage}"${options.flamingo ? ' data-xwiki-reference="xwiki:' + reference + '"' : ''}><title>Local workflow test fixture — production theme not loaded</title>${options.flamingo ? '' : '<meta name="document" content="' + reference + '">'}
       <link rel="stylesheet" href="/test/bootstrap.css"><link rel="stylesheet" href="/test/tree.css">
       <script src="/test/jquery.js"></script><script src="/test/jstree.js"></script><script src="/test/bootstrap.js"></script>
       <script>window.define=function(deps,factory){factory(window.jQuery,{delayPageReady:function(){}},function(){});};</script>
@@ -564,6 +564,63 @@ test('administrator keeps the standard Done button', async () => {
     assert.equal(await wiki.page.locator('.realtime-action-done').textContent(), 'Done');
     assert.equal(await wiki.page.locator('#luxpedia-publish-category').count(), 0);
     assert.equal(wiki.state.actions.length, 0);
+  } finally { await wiki.context.close(); }
+});
+
+for (const flamingo of [false, true]) {
+  test('admin gets a visible native template-creation shortcut and center link ' + JSON.stringify({ flamingo }), async () => {
+    const wiki = await wikiFixture({ admin: true, navbar: true, flamingo });
+    try {
+      await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
+      const create = wiki.page.locator('#luxpedia-create-article-template');
+      await create.waitFor();
+      assert.equal(await create.textContent(), 'Create article template');
+      assert.equal(await wiki.page.locator('#menuview .navbar-right > #luxpedia-template-admin').count(), 1);
+      const url = new URL(await create.getAttribute('href'), wiki.origin);
+      assert.equal(url.pathname, '/bin/create/LuxPedia/Templates/WebHome');
+      assert.equal(url.searchParams.get('spaceReference'), 'LuxPedia.Templates');
+      assert.equal(url.searchParams.get('template'), 'LuxPedia.Code.ArticleTemplateSeed');
+      assert.equal(await wiki.page.locator('#luxpedia-open-template-center').getAttribute('href'), '/bin/view/LuxPedia/Templates/');
+      await wiki.page.fill('#xwikieditor', 'Unsaved article');
+      const current = wiki.page.url();
+      await wiki.page.selectOption('#luxpedia-language-select', 'zh');
+      assert.equal(wiki.page.url(), current);
+      assert.equal(await create.textContent(), '创建文章模板');
+      assert.equal(await wiki.page.locator('#luxpedia-open-template-center').textContent(), '文章模板');
+      assert.equal(await wiki.page.locator('#xwikieditor').inputValue(), 'Unsaved article');
+      assert.equal(await wiki.page.locator('#original-menu').textContent(), 'Original menu');
+      assert.equal(await wiki.page.locator('#luxpedia-template-admin').count(), 1);
+      assert.deepEqual(wiki.state.actions, []);
+      assert.deepEqual(wiki.state.errors, []);
+    } finally { await wiki.context.close(); }
+  });
+}
+
+for (const role of ['editor', 'reviewer', 'reader']) {
+  test('template admin shortcuts are absent for ' + role, async () => {
+    const wiki = await wikiFixture({ role, navbar: true });
+    try {
+      const checked = wiki.page.waitForResponse(response => response.url().includes('/Workflow/CurrentRoles?'));
+      await wiki.page.goto(wiki.origin + '/bin/view/Drafts/NewArticle/WebHome');
+      await checked;
+      await wiki.page.waitForFunction(() => document.querySelector('#luxpedia-language-select'));
+      assert.equal(await wiki.page.locator('#luxpedia-template-admin').count(), 0);
+      assert.deepEqual(wiki.state.errors, []);
+    } finally { await wiki.context.close(); }
+  });
+}
+
+test('admin template shortcuts move into a delayed native navigation bar without duplicates', async () => {
+  const wiki = await wikiFixture({ admin: true });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
+    await wiki.page.locator('#luxpedia-create-article-template').waitFor();
+    await wiki.page.evaluate(() => {
+      document.body.insertAdjacentHTML('afterbegin', '<header id="headerglobal"><nav id="menuview"><ul class="navbar-right"></ul></nav></header>');
+    });
+    await wiki.page.locator('#menuview .navbar-right > #luxpedia-template-admin').waitFor();
+    assert.equal(await wiki.page.locator('#luxpedia-template-admin').count(), 1);
+    assert.deepEqual(wiki.state.errors, []);
   } finally { await wiki.context.close(); }
 });
 
