@@ -14,6 +14,14 @@ const extracted = spawnSync('python3', ['-c',
   'import runpy, sys; print(runpy.run_path(sys.argv[1])["WORKFLOW_UX_JS"])', source], { encoding: 'utf8' });
 assert.equal(extracted.status, 0, extracted.stderr);
 const ux = extracted.stdout;
+const nativeAssets = {
+  '/test/jquery.js': fs.readFileSync(require.resolve('jquery/dist/jquery.js'), 'utf8'),
+  '/test/jstree.js': fs.readFileSync(require.resolve('jstree/dist/jstree.js'), 'utf8'),
+  '/test/bootstrap.js': fs.readFileSync(require.resolve('bootstrap/dist/js/bootstrap.js'), 'utf8'),
+  '/test/bootstrap.css': fs.readFileSync(require.resolve('bootstrap/dist/css/bootstrap.css'), 'utf8'),
+  '/test/tree.css': fs.readFileSync(require.resolve('jstree/dist/themes/default/style.css'), 'utf8').replaceAll('jstree-default', 'jstree-xwiki'),
+  '/test/xwiki-tree.js': fs.readFileSync(path.join(__dirname, 'vendor/xwiki-tree-17.10.15.js'), 'utf8'),
+};
 const prefix = 'luxpedia.workflow.submit.';
 let browser;
 before(async () => { browser = await chromium.launch({
@@ -76,6 +84,14 @@ async function wikiFixture(options = {}) {
         options.noDraftForm ? '' : form('getEditableDraft')) + form('archive') + form('unpublish') :
       state.status === 'archived' ? form('publishfromarchive') + form('backtodraft') : '';
     return `<!doctype html><html lang="${nativeLanguage}"><title>Local workflow test fixture — production theme not loaded</title><meta name="document" content="${reference}">
+      <link rel="stylesheet" href="/test/bootstrap.css"><link rel="stylesheet" href="/test/tree.css">
+      <script src="/test/jquery.js"></script><script src="/test/jstree.js"></script><script src="/test/bootstrap.js"></script>
+      <script>window.define=function(deps,factory){factory(window.jQuery,{delayPageReady:function(){}},function(){});};</script>
+      <script src="/test/xwiki-tree.js"></script>
+      <script>delete window.define; window.require=function(deps,ready,fail){
+        window.requestedTreeModules=deps;
+        ${options.treeLoadFailure ? 'fail();' : 'ready(window.jQuery);'}
+      };</script>
       ${options.navbar ? '<header id="headerglobal"><nav id="menuview"><ul class="navbar-right"><li id="original-menu">Original menu</li></ul></nav></header>' : ''}
       <p role="note">Local test fixture. The production LuxPedia theme is not loaded.</p>
       <div data-xwiki-form-token="test-token"></div>
@@ -93,6 +109,9 @@ async function wikiFixture(options = {}) {
     const request = route.request();
     const url = new URL(request.url());
     const pathname = decodeURIComponent(url.pathname);
+    if (nativeAssets[pathname]) {
+      return route.fulfill({ contentType: pathname.endsWith('.css') ? 'text/css' : 'text/javascript', body: nativeAssets[pathname] });
+    }
     const json = body => route.fulfill({ json: body });
     if (pathname === '/bin/get/LuxPedia/Workflow/DraftWorkspace') {
       const name = url.searchParams.get('reference');
@@ -152,8 +171,14 @@ async function wikiFixture(options = {}) {
     }
     if (pathname === '/bin/view/Knowledge/CategoryIndex') {
       return route.fulfill({ contentType: 'text/html', body:
-        '<a href="/bin/view/Knowledge/Technical/WebHome">技术文档</a>' +
-        '<a href="/bin/view/Knowledge/Operations/WebHome">操作手册</a>' });
+        '<a href="/bin/view/XWiki/WebHome">System</a><a href="/bin/view/Knowledge/NotACategory/WebHome">Navigation</a>' +
+        '<table class="luxpedia-system-list"><tr><td><a href="/bin/view/Knowledge/Technical/WebHome">技术文档</a>' +
+        '<a href="/bin/view/Knowledge/Operations/WebHome">操作手册</a>' +
+        (options.nestedCategories ? '<a href="/bin/view/Knowledge/Technical/Maintenance/WebHome">Maintenance</a>' +
+          '<a href="/bin/view/Knowledge/Technical/Maintenance/Checks/WebHome">Checks &lt;安全&gt;</a>' : '') +
+        '<a href="/bin/view/Drafts/Private/WebHome">Draft</a>' +
+        '<a href="https://other.example/bin/view/Knowledge/Foreign/WebHome">Foreign</a>' +
+        '</td></tr></table>' });
     }
     if (pathname === '/bin/get/LuxPedia/Workflow/CurrentRoles') {
       return route.fulfill({ contentType: 'text/plain', body: JSON.stringify({
@@ -230,13 +255,27 @@ async function wikiFixture(options = {}) {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = 'http://127.0.0.1:' + server.address().port;
   context.on('close', () => server.close());
+  async function chooseCategory(key) {
+    await page.locator('#luxpedia-category-toggle').click();
+    const id = key === '__root__' ? 'publication-category-root' : 'publication-category-' + encodeURIComponent(key);
+    await page.waitForFunction(id => window.jQuery?.jstree.reference(document.getElementById('luxpedia-category-tree'))?.get_node(id), id);
+    const parents = await page.evaluate(id => window.jQuery.jstree.reference(document.getElementById('luxpedia-category-tree')).get_node(id).parents.slice().reverse(), id);
+    for (const parent of parents.filter(parent => parent !== '#')) {
+      const item = page.locator('[id="' + parent + '"]');
+      if (await item.locator(':scope > .jstree-anchor').getAttribute('aria-expanded') === 'false') {
+        await item.locator(':scope > .jstree-ocl').click();
+      }
+    }
+    await page.locator('[id="' + id + '"] > .jstree-anchor').click();
+  }
   async function preview(category) {
     await page.goto(origin + editPath);
     if (!options.linkedTarget) {
       const selector = options.nativeCategory && !options.lateNativeCategory ?
         'select[data-luxpedia-publication-category]' : '#luxpedia-publish-category';
-      await page.locator(selector).waitFor();
-      if (category !== undefined) { await page.selectOption(selector, category); }
+      await page.locator(selector).waitFor({ state: 'attached' });
+      await page.locator('#luxpedia-category-toggle').waitFor();
+      if (category !== undefined) { await chooseCategory(category); }
     } else {
       await page.locator('#luxpedia-category-choice').waitFor();
       assert.equal(await page.locator('#luxpedia-publish-category').count(), 0);
@@ -272,7 +311,7 @@ async function wikiFixture(options = {}) {
       assert.equal(start.workflow, 'LuxPedia.Workflow.Config');
     }
   }
-  return { context, page, state, preview, submit, expectPending, pendingKey, origin, nativeCategoryMarkup };
+  return { context, page, state, preview, submit, expectPending, pendingKey, origin, nativeCategoryMarkup, chooseCategory };
 }
 
 for (const value of ['Operations', '操作手册', 'Knowledge.Operations.WebHome', 'xwiki:Knowledge.Operations.WebHome']) {
@@ -295,14 +334,15 @@ test('native property node, selection, options and event bindings survive langua
   try {
     await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
     const native = wiki.page.locator('select[data-luxpedia-publication-category]');
-    await native.waitFor();
-    assert.equal(await wiki.page.locator('#luxpedia-category-choice').count(), 0);
+    await native.waitFor({ state: 'attached' });
+    assert.equal(await wiki.page.locator('#luxpedia-category-choice').count(), 1);
+    assert.equal(await native.isVisible(), false);
     await wiki.page.evaluate(() => { window.originalCategory = document.querySelector('select[data-luxpedia-publication-category]'); });
     assert.equal(await native.inputValue(), 'Operations');
     assert.equal(await native.getAttribute('name'), 'LuxPedia.Code.ArticleClass_0_primaryCategory');
     assert.equal(await native.getAttribute('class'), 'native-property-widget');
     await wiki.page.fill('#xwikieditor', 'Unsaved article');
-    await native.selectOption('Technical');
+    await wiki.chooseCategory('Technical');
     const url = wiki.page.url();
     await wiki.page.selectOption('#luxpedia-language-select', 'zh');
     assert.equal(wiki.page.url(), url);
@@ -363,17 +403,106 @@ test('late native property replaces fallback without losing a changed category o
   } });
   try {
     await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
-    await wiki.page.locator('#luxpedia-publish-category').selectOption('Technical');
+    await wiki.chooseCategory('Technical');
     await wiki.page.fill('#xwikieditor', 'Keep this draft');
     await wiki.page.evaluate(markup => document.querySelector('#xwikieditor').insertAdjacentHTML('beforebegin', markup), wiki.nativeCategoryMarkup());
     const native = wiki.page.locator('select[data-luxpedia-publication-category]');
-    await native.waitFor();
+    await native.waitFor({ state: 'attached' });
     assert.equal(await native.inputValue(), 'Technical');
     assert.equal(await wiki.page.locator('#luxpedia-publish-category').count(), 0);
     assert.equal(await wiki.page.locator('#xwikieditor').inputValue(), 'Keep this draft');
     await wiki.page.locator('.realtime-action-done').click();
     await wiki.page.locator('#luxpedia-submit-review').click();
     await wiki.expectPending('Knowledge.Technical.NewArticle');
+  } finally { await wiki.context.close(); }
+});
+
+test('native breadcrumb tree exposes only Knowledge categories and preserves expansion without navigation', async () => {
+  const wiki = await wikiFixture({ nestedCategories: true });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
+    await wiki.page.fill('#xwikieditor', 'Unsaved content');
+    const url = wiki.page.url();
+    await wiki.page.locator('#luxpedia-category-toggle').click();
+    await wiki.page.locator('#publication-category-root').waitFor();
+    const tree = await wiki.page.evaluate(() => {
+      const instance = window.jQuery.jstree.reference(document.getElementById('luxpedia-category-tree'));
+      return { data: instance.get_json('#', { flat: true }).map(node => node.text),
+        editable: instance.settings.core.check_callback, plugins: instance.settings.plugins,
+        multiple: instance.settings.core.multiple, modules: window.requestedTreeModules };
+    });
+    assert.deepEqual(tree.modules, ['xwiki-tree', 'bootstrap']);
+    assert.deepEqual(tree.data, ['Knowledge', '技术文档', 'Maintenance', 'Checks <安全>', '操作手册']);
+    assert.equal(tree.editable, false);
+    assert.equal(tree.multiple, false);
+    assert.deepEqual(tree.plugins, []);
+    assert.equal(await wiki.page.locator('#luxpedia-publish-category').isVisible(), false);
+    await wiki.page.locator('[id="publication-category-Technical"] > .jstree-ocl').click();
+    assert.equal(await wiki.page.locator('#luxpedia-category-tree').isVisible(), true);
+    assert.equal(wiki.page.url(), url);
+    assert.equal(await wiki.page.locator('#xwikieditor').inputValue(), 'Unsaved content');
+    assert.equal(await wiki.page.locator('#luxpedia-publish-category').inputValue(), '__root__');
+    await wiki.page.keyboard.press('Escape');
+    assert.equal(await wiki.page.locator('#luxpedia-category-tree').isVisible(), false);
+    assert.equal(await wiki.page.locator('#luxpedia-publish-category').inputValue(), '__root__');
+    assert.deepEqual(wiki.state.actions, []);
+    assert.deepEqual(wiki.state.errors, []);
+  } finally { await wiki.context.close(); }
+});
+
+test('selecting a nested category closes the native menu and submits to that exact destination', async () => {
+  const wiki = await wikiFixture({ nestedCategories: true });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
+    await wiki.chooseCategory('Technical.Maintenance.Checks');
+    assert.equal(await wiki.page.locator('#luxpedia-category-tree').isVisible(), false);
+    assert.equal(await wiki.page.locator('#luxpedia-category-selected').textContent(), 'Checks <安全>');
+    assert.equal(await wiki.page.locator('#luxpedia-category-selected script').count(), 0);
+    assert.equal(await wiki.page.locator('#luxpedia-category-toggle').getAttribute('aria-expanded'), 'false');
+    await wiki.page.locator('.realtime-action-done').click();
+    await wiki.page.locator('#luxpedia-submit-review').click();
+    await wiki.expectPending('Knowledge.Technical.Maintenance.Checks.NewArticle');
+  } finally { await wiki.context.close(); }
+});
+
+test('language switching keeps the expanded tree and category without invoking a server tree job', async () => {
+  const wiki = await wikiFixture({ nestedCategories: true });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
+    await wiki.chooseCategory('Technical.Maintenance');
+    await wiki.page.locator('#luxpedia-category-toggle').click();
+    await wiki.page.selectOption('#luxpedia-language-select', 'zh');
+    assert.equal(await wiki.page.locator('#luxpedia-category-selected').textContent(), 'Maintenance');
+    assert.equal(await wiki.page.locator('#luxpedia-category-toggle').getAttribute('aria-label'), '浏览知识库分类');
+    assert.equal(await wiki.page.locator('#publication-category-root > .jstree-anchor').textContent(), '知识库');
+    assert.equal(await wiki.page.locator('#luxpedia-publish-category').inputValue(), 'Technical.Maintenance');
+    assert.deepEqual(wiki.state.errors, []);
+    assert.deepEqual(wiki.state.actions, []);
+  } finally { await wiki.context.close(); }
+});
+
+test('a saved nested category reference is restored in the picker and used after preview', async () => {
+  const wiki = await wikiFixture({ nestedCategories: true, primaryCategory: 'xwiki:Knowledge.Technical.Maintenance.WebHome' });
+  try {
+    await wiki.submit();
+    await wiki.expectPending('Knowledge.Technical.Maintenance.NewArticle');
+  } finally { await wiki.context.close(); }
+});
+
+test('native category-browser load failure preserves the draft and blocks a wrong submission', async () => {
+  const wiki = await wikiFixture({ treeLoadFailure: true });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
+    await wiki.page.locator('#luxpedia-category-tree-error').waitFor();
+    assert.match(await wiki.page.locator('#luxpedia-category-tree-error').textContent(), /could not load/);
+    await wiki.preview();
+    assert.equal(wiki.state.alerts.length, 1);
+    await wiki.page.locator('#luxpedia-submit-review').click();
+    await wiki.page.waitForFunction(() => !document.querySelector('#luxpedia-submit-review').disabled);
+    assert.equal(wiki.state.alerts.length, 2);
+    assert.deepEqual(wiki.state.actions, []);
+    assert.equal(wiki.state.status, '');
+    assert.deepEqual(wiki.state.errors, []);
   } finally { await wiki.context.close(); }
 });
 
@@ -482,9 +611,9 @@ test('language switching in the editor preserves unsaved text and the selected c
   const wiki = await wikiFixture();
   try {
     await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
-    await wiki.page.locator('#luxpedia-publish-category').waitFor();
+    await wiki.page.locator('#luxpedia-category-toggle').waitFor();
     await wiki.page.fill('#xwikieditor', 'Unsaved text 未保存的正文');
-    await wiki.page.selectOption('#luxpedia-publish-category', 'Technical');
+    await wiki.chooseCategory('Technical');
     const url = wiki.page.url();
     await wiki.page.selectOption('#luxpedia-language-select', 'zh');
     assert.equal(wiki.page.url(), url);

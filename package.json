@@ -1,6 +1,13 @@
 {
   "name": "manu-wiki-checks",
   "private": true,
-  "scripts": { "test:ui": "node --test tests/workflow_ux.test.cjs tests/drawio.test.cjs tests/attachments.test.cjs tests/favorites.test.cjs" },
-  "devDependencies": { "playwright": "1.62.1" }
+  "scripts": {
+    "test:ui": "node --test tests/workflow_ux.test.cjs tests/drawio.test.cjs tests/attachments.test.cjs tests/favorites.test.cjs"
+  },
+  "devDependencies": {
+    "bootstrap": "3.4.1",
+    "jquery": "3.7.1",
+    "jstree": "3.3.17",
+    "playwright": "1.62.1"
+  }
 }

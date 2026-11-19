@@ -67,6 +67,7 @@ WORKFLOW_UX_JS = r"""(function () {
 
   /* LUXPEDIA_WORKFLOW_PANEL */
   /* LUXPEDIA_DRAFT_ACTIONS */
+  /* LUXPEDIA_CATEGORY_PICKER */
   /* LUXPEDIA_DRAFT_WORKSPACE */
 
   function documentReference() {
@@ -149,15 +150,20 @@ WORKFLOW_UX_JS = r"""(function () {
       .then(function (response) { return response.ok ? response.text() : ''; })
       .then(function (html) {
         var parsed = new DOMParser().parseFromString(html, 'text/html');
-        var links = Array.from(parsed.querySelectorAll('a[href]'));
+        var list = parsed.querySelector('.luxpedia-system-list');
+        var links = Array.from((list || parsed).querySelectorAll('a[href]'));
         var result = [];
         for (var i = 0; i < links.length; i++) {
           var link = links[i];
           var label = link.textContent.trim();
-          var path = new URL(link.getAttribute('href'), location.origin).pathname;
-          var match = path.match(/^\/bin\/view\/Knowledge\/([^/]+)\/(?:WebHome)?$/);
-          if (match && label && !result.some(function (entry) { return entry.key === decodeURIComponent(match[1]); })) {
-            result.push({ key: decodeURIComponent(match[1]), label: label });
+          var url = new URL(link.getAttribute('href'), location.origin);
+          var match = url.pathname.match(/^\/bin\/view\/Knowledge\/(.+?)\/(?:WebHome)?$/);
+          if (url.origin !== location.origin || !match || !label) { continue; }
+          var parts = match[1].split('/').map(decodeURIComponent);
+          if (parts.some(function (part) { return !part || /[.:\\/]/.test(part); })) { continue; }
+          var key = parts.join('.');
+          if (!result.some(function (entry) { return entry.key === key; })) {
+            result.push({ key: key, label: label });
           }
         }
         return result;
@@ -217,7 +223,7 @@ WORKFLOW_UX_JS = r"""(function () {
   function reuseNativeCategoryField(options) {
     var native = nativeCategoryField();
     if (!native || !native.options.length) { return false; }
-    if (categoryFields.has(native)) { return true; }
+    if (categoryFields.has(native)) { installCategoryTree(native, categoryFields.get(native)); return true; }
     var fallback = document.getElementById('luxpedia-publish-category');
     options = options || fallback && categoryFields.get(fallback);
     if (!options) { return false; }
@@ -233,6 +239,7 @@ WORKFLOW_UX_JS = r"""(function () {
     categoryFields.set(native, options);
     native.setAttribute('data-luxpedia-publication-category', 'true');
     if (fallback) { document.getElementById('luxpedia-category-choice').remove(); }
+    installCategoryTree(native, options);
     return true;
   }
 
@@ -240,6 +247,7 @@ WORKFLOW_UX_JS = r"""(function () {
     var native = document.querySelector('select[data-luxpedia-publication-category]');
     var field = native || document.getElementById('luxpedia-publish-category');
     if (!field) { return null; }
+    if (field.dataset.categoryTreeUnavailable) { return { invalid: true }; }
     var option = field.options[field.selectedIndex];
     if (!native) { return { key: field.value, label: option && option.dataset.label || '' }; }
     if (!option) { return { invalid: true }; }
@@ -594,6 +602,7 @@ WORKFLOW_UX_JS = r"""(function () {
         fields.appendChild(term); fields.appendChild(value); container.appendChild(fields);
         var editor = document.querySelector('#xwikieditor');
         if (editor && editor.parentNode) { editor.parentNode.insertBefore(container, editor); }
+        installCategoryTree(select, options);
       });
     }).catch(function () {
       setTimeout(function () { installCategorySelector(reference, isAdmin, attempts + 1); }, 500);
@@ -675,6 +684,7 @@ WORKFLOW_UX_JS = r"""(function () {
 WORKFLOW_UX_JS = I18N_JS + WORKFLOW_UX_JS.replace(
     '/* LUXPEDIA_WORKFLOW_PANEL */', (UI / 'workflow_panel.js').read_text()).replace(
     '/* LUXPEDIA_DRAFT_ACTIONS */', (UI / 'draft_actions.js').read_text()).replace(
+    '/* LUXPEDIA_CATEGORY_PICKER */', (UI / 'category_picker.js').read_text()).replace(
     '/* LUXPEDIA_DRAFT_WORKSPACE */', (UI / 'draft_workspace.js').read_text())
 
 WORKFLOW_UX_PROPERTIES = {

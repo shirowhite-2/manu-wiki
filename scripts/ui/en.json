@@ -33,6 +33,8 @@
   "backToDraft": "Restore as draft",
   "chooseCategory": "Publish after approval to:",
   "categoryHint": "This choice applies after approval. Your submission stays in Drafts during review.",
+  "browseCategories": "Browse Knowledge categories",
+  "categoryTreeUnavailable": "The category browser could not load. Refresh the page and try again.",
   "root": "Knowledge root",
   "linkedTarget": "After approval, this draft will update:",
   "linkedFallback": "This draft will keep its existing publication location.",

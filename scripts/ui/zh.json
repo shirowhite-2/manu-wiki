@@ -33,6 +33,8 @@
   "backToDraft": "恢复为草稿",
   "chooseCategory": "审核通过后发布到：",
   "categoryHint": "分类将在审核通过后生效，审核期间文章保留在草稿区。",
+  "browseCategories": "浏览知识库分类",
+  "categoryTreeUnavailable": "分类树加载失败，请刷新页面后重试。",
   "root": "知识库根目录",
   "linkedTarget": "审核通过后，此草稿将更新：",
   "linkedFallback": "此草稿会保留原有的发布位置。",

@@ -7,6 +7,7 @@
   }
   function translateWorkflowUI() {
     reuseNativeCategoryField();
+    refreshCategoryTree();
     bindDraftWorkspaceList();
     var workspaceAbandoned = workspaceSnapshot && workspaceSnapshot.abandoned && documentReference().startsWith('Drafts.');
     renderArticleMetadata();
