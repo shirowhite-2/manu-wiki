@@ -11,7 +11,7 @@
     try { localStorage.setItem(key, language); } catch (error) { /* storage is optional */ }
   }
   function t(name) { return messages[language][name] || messages.en[name] || name; }
-  function editing() { return /\/bin\/(?:edit|inline|create)\//.test(location.pathname); }
+  function editing() { return /\/bin\/(?:edit|inline|create|admin)\//.test(location.pathname); }
   window.LuxPediaI18n = { t: t, language: function () { return language; } };
   function update() {
     document.querySelectorAll('[data-luxpedia-i18n]').forEach(function (node) {

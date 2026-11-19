@@ -55,9 +55,12 @@ public class WorkflowPolicyListener implements EventListener
     @Override public void onEvent(Event event, Object source, Object data) {
         if (!(source instanceof XWikiDocument doc) || !(data instanceof XWikiContext context)) { return; }
         try {
-            if (EditLease.scope(doc)) {
+            if (EditLease.scope(doc) || doc.getDocumentReference().getSpaceReferences().get(0).getName().equals("Knowledge")) {
                 DraftWriteBoundary.guard(doc.getDocumentReference().toString());
                 XWikiDocument latest = context.getWiki().getDocument(doc.getDocumentReference(), context);
+                if (nativeRestore() && DraftWorkspace.admin(this, context) && latest.isNew()) {
+                    doc.setOriginalDocument(latest);
+                }
                 XWikiDocument original = doc.getOriginalDocument();
                 boolean exists = !latest.isNew();
                 if (doc.getTranslation() != 0) {
@@ -87,7 +90,9 @@ public class WorkflowPolicyListener implements EventListener
         if (EditLease.scope(doc) && !deleting) {
             if (EditLease.SAVING.get() == doc) { return; } // exact server clone, never an HTTP flag
             boolean admin = DraftWorkspace.admin(this, context);
-            if (Set.of("createDraftDocument", "editDraft").contains(leaseOperation)) {
+            if (admin && nativeRestore()) {
+                if (doc.getTranslation() == 0) { EditLease.clear(doc); }
+            } else if (Set.of("createDraftDocument", "editDraft").contains(leaseOperation)) {
                 require(EditLease.OPENING.get(), "Open linked drafts through the protected edit action.");
                 if (doc.getTranslation() == 0) { EditLease.assign(this, doc, context); }
             } else if (old.isNew() && doc.getTranslation() == 0 && leaseOperation.isEmpty()) {
@@ -439,10 +444,14 @@ public class WorkflowPolicyListener implements EventListener
         new IdentityDirectory(this, context).initialize();
     }
 
+    boolean nativeRestore() {
+        return StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE).walk(frames -> frames.anyMatch(frame ->
+            frame.getDeclaringClass() == com.xpn.xwiki.XWiki.class && frame.getMethodName().equals("restoreFromRecycleBin")));
+    }
     private String fieldLease(XWikiDocument doc) {
         return EditLease.field(doc, "owner") + ":" + EditLease.field(doc, "generation") + ":" + EditLease.field(doc, "expiresAt");
     }
-    public String getPolicyVersion() { return DraftWriteBoundary.present() ? "luxpedia-workflow-policy-10" : "POLICY_WRITE_BOUNDARY_MISSING"; }
+    public String getPolicyVersion() { return DraftWriteBoundary.present() ? "luxpedia-workflow-policy-11" : "POLICY_WRITE_BOUNDARY_MISSING"; }
     /** Deployment migration: remove historical validator EDIT grants without re-authoring content. */
     public int repairExistingDraftRights(XWikiContext context) throws Exception {
         require(authorization.hasAccess(Right.ADMIN, context.getUserReference(),

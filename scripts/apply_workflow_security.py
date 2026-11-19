@@ -100,7 +100,7 @@ def apply(module, wiki):
     wiki.ensure_object_values("LuxPedia/Workflow", "PolicyStatus", "XWiki.XWikiRights", {
         "groups": "XWiki.LuxManagers,XWiki.XWikiAdminGroup", "levels": "view", "allow": "1"})
     status, body = wiki.request("GET", "/bin/get/LuxPedia/Workflow/PolicyStatus?outputSyntax=plain")
-    verify_response(status, body, 'luxpedia-workflow-policy-10', 'PolicyStatus')
+    verify_response(status, body, 'luxpedia-workflow-policy-11', 'PolicyStatus')
     module.log("server workflow policy is active")
     wiki.ensure_page("LuxPedia/Code", "ReviewAuditClass", "Review submission audit", "Server-managed submission audit.", hidden=True)
     wiki.ensure_page("LuxPedia/Workflow", "PolicySetup", "Workflow policy setup", SETUP, hidden=True, update=True)
@@ -110,6 +110,7 @@ def apply(module, wiki):
                      'Server-managed draft ownership and abandonment state.', hidden=True)
     wiki.ensure_page('LuxPedia/Code', 'EditLeaseClass', 'Draft editing lease',
                      'Server-managed 24-hour editing rights.', hidden=True)
+    wiki.ensure_page('LuxPedia/Code', 'AdminSettingsClass', 'Administrator settings schema', 'Server-managed menu and banner settings.', hidden=True)
     token = wiki.form_token()
     status, body = wiki.request("POST", "/bin/get/LuxPedia/Workflow/PolicySetup?outputSyntax=plain",
                                 urllib.parse.urlencode({'form_token': token}),

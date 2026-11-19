@@ -1,0 +1,19 @@
+{{velocity}}
+#if($services.security.authorization.hasAccess('admin', $services.model.resolveDocument('XWiki.XWikiPreferences')))
+{{html clean="false"}}
+<section id="luxpedia-admin-tools">
+<h2 data-luxpedia-i18n="adminTools"></h2>
+<p data-luxpedia-i18n="adminToolsIntro"></p>
+<div class="btn-group" role="group">
+<button type="button" class="btn btn-default" data-admin-tab="dashboard" data-luxpedia-i18n="adminOverview"></button>
+<button type="button" class="btn btn-default" data-admin-tab="pages" data-luxpedia-i18n="adminBatchDelete"></button>
+<button type="button" class="btn btn-default" data-admin-tab="trash" data-luxpedia-i18n="adminTrash"></button>
+</div>
+<p class="xHint" role="status" id="luxpedia-admin-notice"></p>
+<div id="luxpedia-admin-content"></div>
+</section>
+{{/html}}
+#else
+$services.localization.render('luxpedia.adminOnly')
+#end
+{{/velocity}}

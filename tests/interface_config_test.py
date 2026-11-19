@@ -67,7 +67,7 @@ class FakeWiki:
     def request(self, method, path, data=None, content_type=None, **kwargs):
         self.requests.append((method, path, data))
         if 'PolicyStatus?' in path:
-            return 200, b'luxpedia-workflow-policy-10' if self.policy else b'POLICY_NOT_INSTALLED'
+            return 200, b'luxpedia-workflow-policy-11' if self.policy else b'POLICY_NOT_INSTALLED'
         if 'PolicySetup?' in path:
             return 200, b'AUDIT_CLASS_READY'
         if '/translations/' in path:
@@ -659,6 +659,27 @@ class InterfaceConfigTest(unittest.TestCase):
         source = (ROOT / 'scripts/ui/pages/page_browser.xwiki').read_text()
         self.assertIn("hasAccessLevel('view')", source)
         self.assertLess(source.index("hasAccessLevel('view')"), source.index('data-area='))
+
+    def test_administration_reuses_native_sections_and_protects_raw_settings(self):
+        import apply_admin_tools as admin
+        wiki = FakeWiki()
+        admin.apply(Module, wiki)
+        for page, section in [('AdminOperations', 'LuxPediaOperations'), ('NavigationEditor', 'LuxPediaNavigation')]:
+            props = wiki.object_data[('LuxPedia/Code', page, 'XWiki.ConfigurableClass')]
+            self.assertEqual(props['displayInCategory'], 'content')
+            self.assertEqual(props['displayInSection'], section)
+            self.assertIn('context="new"', props['codeToExecute'])
+            self.assertIn("hasAccess('admin'", wiki.pages[('LuxPedia/Code', page)][1])
+        for space, page in [('LuxPedia/Code', 'NavigationSettings'), ('LuxPedia/Workflow', 'AdminTools')]:
+            rule = wiki.object_data[(space, page, 'XWiki.XWikiRights')]
+            self.assertEqual(rule, {'groups': 'XWiki.LuxManagers,XWiki.XWikiAdminGroup', 'levels': 'view', 'allow': '1'})
+        self.assertIn("getMethod() == 'POST'", admin.ENDPOINT)
+        self.assertIn("getParameter('form_token')", admin.ENDPOINT)
+        self.assertIn('private, no-store', admin.PRESENTATION)
+        self.assertNotIn('adminRead', admin.PRESENTATION)
+        self.assertTrue(admin.QR_JS.startswith('(function(define,module,exports)'))
+        self.assertIn('window.LuxPediaQRCode=qrcode;', admin.QR_JS)
+        self.assertIn('MIT', (ROOT / 'scripts/ui/vendor/qrcode-generator.LICENSE').read_text())
 
 
 if __name__ == '__main__':

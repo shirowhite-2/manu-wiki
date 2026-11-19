@@ -35,7 +35,7 @@ class WorkflowPolicyScriptServiceTest {
         service.authorization = mock(AuthorizationManager.class);
         service.csrf = mock(CSRFToken.class);
         listener = mock(WorkflowPolicyListener.class); service.listener = listener;
-        when(listener.getPolicyVersion()).thenReturn("luxpedia-workflow-policy-10");
+        when(listener.getPolicyVersion()).thenReturn("luxpedia-workflow-policy-11");
         context = mock(XWikiContext.class); wiki = mock(XWiki.class); request = mock(XWikiRequest.class);
         when(context.getWiki()).thenReturn(wiki);
         when(context.getWikiId()).thenReturn("xwiki");
@@ -50,7 +50,7 @@ class WorkflowPolicyScriptServiceTest {
     }
 
     @Test void administratorCanCheckComponentWithoutProgrammingRights() {
-        assertEquals("luxpedia-workflow-policy-10", service.status());
+        assertEquals("luxpedia-workflow-policy-11", service.status());
         verify(service.authorization).hasAccess(eq(Right.ADMIN), any(),
             eq(new DocumentReference("xwiki", "XWiki", "XWikiPreferences")));
         verifyNoMoreInteractions(service.authorization);

@@ -27,6 +27,7 @@ public class WorkflowPolicyScriptService implements ScriptService
     @Inject Execution execution;
     @Inject AuthorizationManager authorization;
     @Inject CSRFToken csrf;
+    @Inject org.xwiki.environment.Environment environment;
     @Inject org.xwiki.script.service.ScriptServiceManager services;
     @Inject @Named("luxpedia-workflow-policy") EventListener listener;
 
@@ -97,6 +98,43 @@ public class WorkflowPolicyScriptService implements ScriptService
         catch (Exception error) { return java.util.Map.of("status", "unavailable"); }
     }
 
+    public java.util.Map<String, Object> adminRead(String operation, String search, String area, String page, String days) {
+        XWikiContext context = context();
+        if (!administrator(context)) { return java.util.Map.of("status", "forbidden"); }
+        try {
+            var policy = (WorkflowPolicyListener) listener; var admin = new AdminOperations(policy, context, services); admin.environment = environment;
+            java.util.Map<String, Object> result = switch (operation == null ? "" : operation) {
+                case "pages" -> admin.pages(search, area, page);
+                case "trash" -> admin.trash(page);
+                case "settings" -> new NavigationSettings(policy, context).read();
+                case "categories" -> java.util.Map.of("status", "ok", "items", new NavigationSettings(policy, context).categories());
+                default -> admin.dashboard(days);
+            };
+            var response = new java.util.LinkedHashMap<>(result); response.put("token", csrf.getToken()); return response;
+        } catch (Exception error) { return java.util.Map.of("status", "unavailable"); }
+    }
+    public java.util.Map<String, Object> adminWrite(String operation, String payload, String token) {
+        XWikiContext context = context();
+        if (!administrator(context)) { return java.util.Map.of("status", "forbidden"); }
+        if (context.getRequest() == null || !"POST".equals(context.getRequest().getMethod())) { return java.util.Map.of("status", "post_required"); }
+        if (!csrf.isTokenValid(token)) { return java.util.Map.of("status", "bad_token"); }
+        try {
+            var policy = (WorkflowPolicyListener) listener; var admin = new AdminOperations(policy, context, services); admin.environment = environment;
+            return switch (operation == null ? "" : operation) {
+                case "preview-delete" -> admin.preview("delete", payload);
+                case "preview-restore" -> admin.preview("restore", payload);
+                case "execute" -> admin.execute(payload);
+                case "save-settings" -> new NavigationSettings(policy, context).save(payload);
+                default -> java.util.Map.of("status", "invalid_operation");
+            };
+        } catch (SecurityException conflict) { return java.util.Map.of("status", "conflict"); }
+        catch (Exception error) { return java.util.Map.of("status", "unavailable"); }
+    }
+    public java.util.Map<String, Object> presentation(String name) {
+        try { return new NavigationSettings((WorkflowPolicyListener) listener, context()).presentation(name); }
+        catch (Exception error) { return java.util.Map.of("status", "unavailable"); }
+    }
+
     public String initialize(String token) throws Exception {
         XWikiContext context = context();
         if (!administrator(context)) { return "POLICY_FORBIDDEN"; }
@@ -128,6 +166,10 @@ public class WorkflowPolicyScriptService implements ScriptService
             if (leaseSchema.getXClass().get(field) == null) { leaseChanged |= leaseSchema.getXClass().addTextField(field, field, 100); }
         }
         if (leaseChanged) { context.getWiki().saveDocument(leaseSchema, "Ensure persistent editing lease fields", true, context); }
+        XWikiDocument adminSchema = context.getWiki().getDocument(new DocumentReference(context.getWikiId(), List.of("LuxPedia", "Code"), "AdminSettingsClass"), context).clone();
+        if (adminSchema.getXClass().get("payload") == null && adminSchema.getXClass().addTextAreaField("payload", "Settings", 80, 20)) {
+            context.getWiki().saveDocument(adminSchema, "Ensure administrator settings fields", true, context);
+        }
         ((WorkflowPolicyListener) listener).repairExistingDraftRights(context);
         ((WorkflowPolicyListener) listener).registerExistingKnowledgeTargets(context);
         ((WorkflowPolicyListener) listener).repairIdentityPrivacy(context);

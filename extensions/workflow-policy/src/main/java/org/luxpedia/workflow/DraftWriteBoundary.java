@@ -33,7 +33,7 @@ public final class DraftWriteBoundary implements ServletContainerInitializer, Fi
     }
     static void guard(String name) throws InterruptedException {
         Scope scope = CURRENT.get();
-        WorkflowPolicyListener.require(scope != null, "Draft write boundary is unavailable; restart XWiki with policy 10.");
+        WorkflowPolicyListener.require(scope != null, "Draft write boundary is unavailable; restart XWiki with the current policy.");
         var lock = LOCKS[Math.floorMod(name.hashCode(), LOCKS.length)];
         if (scope.held.contains(lock)) { return; }
         WorkflowPolicyListener.require(lock.tryLock(10, TimeUnit.SECONDS), "Another draft operation is finishing. Please retry.");
