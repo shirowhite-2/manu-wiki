@@ -140,7 +140,7 @@ class InterfaceRenderingTest {
         context.setRoleType(ComponentManager.class); context.setRoleHint("context");
         manager.registerComponent(context, manager);
         Parser parser = manager.getInstance(Parser.class, "xwiki/2.1");
-        for (String name : List.of("review_queue", "categories", "articles", "drafts", "archive")) {
+        for (String name : List.of("review_queue", "categories", "articles", "drafts", "archive", "page_browser")) {
             var xdom = parser.parse(new StringReader(renderSource(name, "en", List.of("First", "Second"))));
             var macros = xdom.<MacroBlock>getBlocks(new ClassBlockMatcher(MacroBlock.class), Block.Axes.DESCENDANT);
             assertEquals(1, macros.size());

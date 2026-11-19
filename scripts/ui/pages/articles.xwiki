@@ -3,7 +3,7 @@
 
 
 {{html clean="false"}}
-<p><a href="$escapetool.xml($xwiki.getURL('Knowledge.Archive.WebHome'))">#lp('archiveCenter')</a></p>
+<p><a class="btn btn-default" href="$escapetool.xml($xwiki.getURL('LuxPedia.Help.PageBrowser'))">#lp('pageBrowser')</a> · <a href="$escapetool.xml($xwiki.getURL('Knowledge.Archive.WebHome'))">#lp('archiveCenter')</a></p>
 <table class="table table-striped luxpedia-system-list" style="width:100%;table-layout:fixed;overflow-wrap:anywhere">
 <thead><tr><th scope="col">#lp('title')</th><th scope="col">#lp('status')</th><th scope="col">#lp('owner')</th><th scope="col">#lp('tags')</th></tr></thead>
 <tbody>

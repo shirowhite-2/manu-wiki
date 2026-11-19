@@ -495,7 +495,7 @@ class InterfaceConfigTest(unittest.TestCase):
         allowed = set(interface.PAGES) | {('PublicationWorkflow', 'Translations'), ('PublicationWorkflow', 'WebHome'),
             ('PublicationWorkflow', 'Overview'), ('Knowledge', 'CategoryAdmin'),
             ('LuxPedia/Code', 'CategoryHomeTemplate'), ('LuxPedia/Code', 'InterfaceTranslations'),
-            ('LuxPedia/Code', 'CategoryList'), ('LuxPedia/Code', 'ArticleList'),
+            ('LuxPedia/Code', 'CategoryList'), ('LuxPedia/Code', 'ArticleList'), ('LuxPedia/Code', 'PageBrowser'),
             ('LuxPedia/Code', 'ArchiveList'), ('Knowledge/Archive', 'WebHome'),
             ('LuxPedia/Templates', 'Article'), ('LuxPedia/Templates', 'ArticleProvider'),
             ('LuxPedia/Templates', 'WebHome'), ('LuxPedia/Code', 'ArticleTemplateSeed'),
@@ -643,6 +643,22 @@ class InterfaceConfigTest(unittest.TestCase):
         wiki.request = lambda *args, **kwargs: (403, b'forbidden')
         with self.assertRaisesRegex(RuntimeError, 'translation zh: 403'):
             interface.ensure_translation(wiki, 'Main', 'WebHome', 'zh', '首页', '正文')
+
+    def test_content_tools_install_only_protected_scripts_and_browser_help_pages(self):
+        import apply_content_tools as content_tools
+        wiki = FakeWiki()
+        content_tools.apply(Module, wiki)
+        self.assertEqual(set(wiki.pages), {('LuxPedia/Code', 'ContentTools')})
+        props = wiki.object_data[('LuxPedia/Code', 'ContentTools', 'XWiki.JavaScriptExtension')]
+        self.assertIn('LuxPediaTableExport', props['code'])
+        self.assertIn('Content components', props['code'])
+        self.assertNotIn('eval(', props['code'])
+        self.assertEqual(props['parse'], '0')
+        self.assertIn(('LuxPedia/Help', 'PageBrowser'), interface.PAGES)
+        self.assertIn(('LuxPedia/Help', 'ContentComponents'), interface.PAGES)
+        source = (ROOT / 'scripts/ui/pages/page_browser.xwiki').read_text()
+        self.assertIn("hasAccessLevel('view')", source)
+        self.assertLess(source.index("hasAccessLevel('view')"), source.index('data-area='))
 
 
 if __name__ == '__main__':

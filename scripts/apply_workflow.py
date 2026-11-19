@@ -937,6 +937,8 @@ def apply(module, wiki):
     apply_drawio(module, wiki)
     from apply_favorites import apply as apply_favorites
     apply_favorites(module, wiki)
+    from apply_content_tools import apply as apply_content_tools
+    apply_content_tools(module, wiki)
     # Update auxiliary controls to use the same persisted interface language.
     for filename in ("apply_video_insert.py", "apply_admin_upload.py"):
         spec = importlib.util.spec_from_file_location(filename[:-3], ROOT / "scripts" / filename)

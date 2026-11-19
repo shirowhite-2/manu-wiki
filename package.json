@@ -2,7 +2,7 @@
   "name": "manu-wiki-checks",
   "private": true,
   "scripts": {
-    "test:ui": "node --test tests/workflow_ux.test.cjs tests/drawio.test.cjs tests/attachments.test.cjs tests/favorites.test.cjs"
+    "test:ui": "node --test tests/workflow_ux.test.cjs tests/drawio.test.cjs tests/attachments.test.cjs tests/favorites.test.cjs tests/content_tools.test.cjs"
   },
   "devDependencies": {
     "bootstrap": "3.4.1",

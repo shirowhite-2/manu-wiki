@@ -51,8 +51,10 @@ PAGES = {
     ("Knowledge", "CategoryGuide"): ("categoryGuide", ""),
     ("Knowledge", "DocumentLibrary"): ("library", ""),
     ("Drafts", "WebHome"): ("drafts", ""),
-    ("LuxPedia/Help", "EditGuide"): ("editGuide", V + "= #lp('editGuide') =\n\n#lp('guideContent')\n" + END),
-    ("LuxPedia/Help", "WebHome"): ("help", V + "= #lp('help') =\n\n#lp('guideContent')\n" + END),
+    ("LuxPedia/Help", "PageBrowser"): ("pageBrowser", V + "= #lp('pageBrowser') =\n\n#lp('pageBrowserIntro')\n\n{{include reference=\"LuxPedia.Code.PageBrowser\" author=\"target\"/}}\n" + END),
+    ("LuxPedia/Help", "ContentComponents"): ("contentComponents", V + "= #lp('contentComponents') =\n\n#lp('componentGuideText')\n" + END),
+    ("LuxPedia/Help", "EditGuide"): ("editGuide", V + "= #lp('editGuide') =\n\n#lp('guideContent')\n\n[[#lp('contentComponents')>>LuxPedia.Help.ContentComponents]] · [[#lp('pageBrowser')>>LuxPedia.Help.PageBrowser]]\n" + END),
+    ("LuxPedia/Help", "WebHome"): ("help", V + "= #lp('help') =\n\n#lp('guideContent')\n\n[[#lp('contentComponents')>>LuxPedia.Help.ContentComponents]] · [[#lp('pageBrowser')>>LuxPedia.Help.PageBrowser]]\n" + END),
     ("LuxPedia/About", "WebHome"): ("about", V + "= #lp('about') =\n\n#lp('aboutContent')\n" + END),
     ("LuxPedia", "WebHome"): ("helpCenter", V + "= #lp('helpCenter') =\n\n[[#lp('workflowCenter')>>LuxPedia.Workflow.WebHome]] · [[#lp('help')>>LuxPedia.Help.WebHome]] · [[#lp('about')>>LuxPedia.About.WebHome]]\n" + END),
 }
@@ -150,7 +152,7 @@ def apply(module, wiki):
         if changes:
             wiki.ensure_object_values('XWiki', 'XWikiPreferences', 'XWiki.XWikiPreferences', changes)
         break
-    for renderer, content in [('CategoryList', V + CATEGORY_LIST + END), ('ArticleList', V + ARTICLE_LIST + END),
+    for renderer, content in [('PageBrowser', V + (UI / 'pages/page_browser.xwiki').read_text() + END), ('CategoryList', V + CATEGORY_LIST + END), ('ArticleList', V + ARTICLE_LIST + END),
                               ('DraftList', V + (UI / 'pages/drafts.xwiki').read_text() + END), ('DraftTools', DRAFT_TOOLS),
                               ('ArchiveList', V + ARCHIVE_LIST + END)]:
         wiki.ensure_page('LuxPedia/Code', renderer, renderer, content, hidden=True, update=True)
