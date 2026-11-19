@@ -6,7 +6,7 @@
 
 ## 现有 Mac 实例升级（8081）
 
-当前分支需要 **`luxpedia-workflow-policy-11`**；即使已经安装策略 10，也要重新构建 JAR 和镜像。先按原有流程备份数据库和 XWiki 数据卷，保留原项目目录、`.env`、`.secrets`、Compose 项目名和数据卷。在项目目录依次执行：
+当前分支需要 **`luxpedia-workflow-policy-12`**；即使已经安装策略 10 / 11，也要重新构建 JAR 和镜像。先按原有流程备份数据库和 XWiki 数据卷，保留原项目目录、`.env`、`.secrets`、Compose 项目名和数据卷。在项目目录依次执行：
 
 ```bash
 git switch feat/article-translation &&
@@ -29,6 +29,12 @@ NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
 - 管理员首页：`http://127.0.0.1:8081/bin/view/XWiki/`
 
 日后普通重启只需 `docker compose -f compose.yaml -f compose.workflow-policy.yaml up -d`；升级代码才需要完整步骤。
+
+## 策略 11 升级时权限迁移报编辑锁错误
+
+若 `PolicySetup` 报 `Editing right expired or belongs to another editor`，同时错误页面是带附件的旧草稿，这是策略 11 的迁移兼容问题。附件深复制导致旧逻辑把权限迁移误判为内容编辑。策略 12 在取得文档守卫后读取最新草稿，仅对内部迁移克隆的同步保存使用受保护的权限更新通道；保留正文、标题、附件、工作流、内容作者、放弃状态及租约的持有人、代号和截止时间。普通保存仍校验编辑权。
+
+按上面的完整命令更新、重建 JAR/镜像、重建容器后重新执行安装器即可；之前已成功创建的配置可重复应用，不需要删除出错草稿或手动接手。
 
 ## 管理工具
 

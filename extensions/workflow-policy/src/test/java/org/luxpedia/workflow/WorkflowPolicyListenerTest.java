@@ -586,7 +586,9 @@ class WorkflowPolicyListenerTest {
         when(old.clone()).thenReturn(doc);
         when(old.getContentAuthorReference()).thenReturn(ref("XWiki.originalAuthor"));
         states("validating", "validating");
-        assertEquals(1, policy.repairExistingDraftRights(context));
+        try (var ignored = DraftWriteBoundary.open()) {
+            assertEquals(1, policy.repairExistingDraftRights(context));
+        }
         verify(doc).setContentAuthorReference(ref("XWiki.originalAuthor"));
         verify(doc, never()).setContent(anyString());
         verify(wiki).saveDocument(doc, "Normalize LuxPedia workflow role permissions", true, context);
@@ -619,7 +621,9 @@ class WorkflowPolicyListenerTest {
         BaseObject flow = object("draft");
         when(draft.getObject(WorkflowPolicyListener.WF)).thenReturn(flow);
         when(draft.newXObject(any(DocumentReference.class), eq(context))).thenAnswer(invocation -> mock(BaseObject.class));
-        assertEquals(1, policy.repairExistingDraftRights(context));
+        try (var ignored = DraftWriteBoundary.open()) {
+            assertEquals(1, policy.repairExistingDraftRights(context));
+        }
         verify(query).setWiki("secondary");
         verify(wiki).getDocument(expected, context);
         verify(draft, atLeastOnce()).newXObject(new DocumentReference("secondary", "XWiki", "XWikiRights"), context);

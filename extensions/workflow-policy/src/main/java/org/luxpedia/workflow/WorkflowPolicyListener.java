@@ -451,7 +451,7 @@ public class WorkflowPolicyListener implements EventListener
     private String fieldLease(XWikiDocument doc) {
         return EditLease.field(doc, "owner") + ":" + EditLease.field(doc, "generation") + ":" + EditLease.field(doc, "expiresAt");
     }
-    public String getPolicyVersion() { return DraftWriteBoundary.present() ? "luxpedia-workflow-policy-11" : "POLICY_WRITE_BOUNDARY_MISSING"; }
+    public String getPolicyVersion() { return DraftWriteBoundary.present() ? "luxpedia-workflow-policy-12" : "POLICY_WRITE_BOUNDARY_MISSING"; }
     /** Deployment migration: remove historical validator EDIT grants without re-authoring content. */
     public int repairExistingDraftRights(XWikiContext context) throws Exception {
         require(authorization.hasAccess(Right.ADMIN, context.getUserReference(),
@@ -466,12 +466,25 @@ public class WorkflowPolicyListener implements EventListener
             require(reference.getWikiReference().equals(wikiReference) &&
                 reference.getSpaceReferences().get(0).getName().equals("Drafts"),
                 "Draft permission migration must stay within the current wiki's Drafts space.");
+            // Serialize against editor writes before reading the version used for this migration.
+            DraftWriteBoundary.guard(reference.toString());
             XWikiDocument original = context.getWiki().getDocument(reference, context);
+            if (original.isNew()) { continue; } // A query result can disappear before we obtain its guard.
             XWikiDocument draft = original.clone();
+            draft.setOriginalDocument(original);
             normalizeDraftRights(draft, status(draft.getObject(WF)), context);
             draft.setHidden(status(draft.getObject(WF)).equals("published") || DraftWorkspace.abandoned(draft));
             draft.setContentAuthorReference(original.getContentAuthorReference());
-            context.getWiki().saveDocument(draft, "Normalize LuxPedia workflow role permissions", true, context);
+            // Attachment clones have different identities, so contentChanged cannot identify an ACL-only
+            // migration. Trust only this exact server clone during its synchronous save; never an HTTP flag.
+            XWikiDocument previousSave = EditLease.SAVING.get();
+            EditLease.SAVING.set(draft);
+            try {
+                context.getWiki().saveDocument(draft, "Normalize LuxPedia workflow role permissions", true, context);
+            } finally {
+                if (previousSave == null) { EditLease.SAVING.remove(); }
+                else { EditLease.SAVING.set(previousSave); }
+            }
             repaired++;
         }
         return repaired;

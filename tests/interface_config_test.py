@@ -67,7 +67,7 @@ class FakeWiki:
     def request(self, method, path, data=None, content_type=None, **kwargs):
         self.requests.append((method, path, data))
         if 'PolicyStatus?' in path:
-            return 200, b'luxpedia-workflow-policy-11' if self.policy else b'POLICY_NOT_INSTALLED'
+            return 200, b'luxpedia-workflow-policy-12' if self.policy else b'POLICY_NOT_INSTALLED'
         if 'PolicySetup?' in path:
             return 200, b'AUDIT_CLASS_READY'
         if '/translations/' in path:
@@ -659,6 +659,10 @@ class InterfaceConfigTest(unittest.TestCase):
         source = (ROOT / 'scripts/ui/pages/page_browser.xwiki').read_text()
         self.assertIn("hasAccessLevel('view')", source)
         self.assertLess(source.index("hasAccessLevel('view')"), source.index('data-area='))
+
+    def test_policy_11_is_rejected_before_attempting_draft_migration(self):
+        with self.assertRaisesRegex(RuntimeError, 'rebuild the JAR and Docker image'):
+            security.verify_response(200, b'luxpedia-workflow-policy-11', 'luxpedia-workflow-policy-12', 'PolicyStatus')
 
     def test_administration_reuses_native_sections_and_protects_raw_settings(self):
         import apply_admin_tools as admin

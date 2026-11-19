@@ -47,7 +47,7 @@ class AdminToolsTest {
             var copy = new HashMap<String, BaseObject>();
             for (var entry : objects.entrySet()) {
                 var values = new HashMap<String, String>();
-                for (String field : List.of("payload", "owner", "generation", "expiresAt", "status", "target", "workflow")) { values.put(field, entry.getValue().getStringValue(field)); }
+                for (String field : List.of("payload", "owner", "generation", "acquiredAt", "expiresAt", "shared", "status", "target", "workflow")) { values.put(field, entry.getValue().getStringValue(field)); }
                 copy.put(entry.getKey(), object(values));
             }
             var clone = document(name, fresh, copy); when(clone.getOriginalDocument()).thenReturn(doc); return clone;
@@ -215,6 +215,84 @@ class AdminToolsTest {
         assertFalse(policy.nativeRestore());
         policy.onEvent(event, changed, context);
         assertTrue(event.isCanceled());
+    }
+
+    XWikiDocument migrationDraft(String state, Map<String, String> lease, boolean abandoned) throws Exception {
+        String name = "Drafts.BOP-PASSIVE.管理员测试.WebHome";
+        var objects = new HashMap<String, BaseObject>();
+        objects.put(WorkflowPolicyListener.WF, object(Map.of("status", state, "target", "Knowledge.Article", "workflow", "LuxPedia.Workflow.Config")));
+        objects.put(DraftWorkspace.CLASS, object(Map.of("status", abandoned ? "abandoned" : "active", "owner", "xwiki:XWiki.originalEditor", "shared", "0")));
+        if (lease != null) { objects.put(EditLease.CLASS, object(lease)); }
+        var original = document(name, false, objects);
+        when(original.getContentAuthorReference()).thenReturn(ref("XWiki.originalAuthor"));
+        var attachment = new XWikiAttachment(); attachment.setFilename("old-diagram.pdf");
+        var copy = original.clone();
+        when(original.getAttachmentList()).thenReturn(List.of(attachment));
+        when(copy.getAttachmentList()).thenReturn(List.of(attachment.clone()));
+        when(original.clone()).thenReturn(copy);
+        assertTrue(DraftWorkspace.contentChanged(original, copy), "Native attachment clones use distinct object identities");
+        store.put(original.getDocumentReference(), original);
+        queries = statement -> List.of(name);
+        return original;
+    }
+    void saveThroughListener() throws Exception {
+        doAnswer(call -> {
+            var copy = (XWikiDocument) call.getArgument(0);
+            assertSame(copy, EditLease.SAVING.get());
+            var event = new org.xwiki.bridge.event.DocumentUpdatingEvent();
+            policy.onEvent(event, copy, context);
+            assertFalse(event.isCanceled(), "Migration must pass the real save listener without an editor lease");
+            store.put(copy.getDocumentReference(), copy); return null;
+        }).when(wiki).saveDocument(any(XWikiDocument.class), eq("Normalize LuxPedia workflow role permissions"), eq(true), eq(context));
+    }
+    @Test void legacyAttachedDraftMigratesThroughSaveListenerWithoutClaimingOrChangingContent() throws Exception {
+        var original = migrationDraft("draft", null, false); var copy = original.clone();
+        saveThroughListener();
+        assertEquals(1, policy.repairExistingDraftRights(context));
+        assertSame(copy, store.get(original.getDocumentReference()));
+        assertSame(original, copy.getOriginalDocument());
+        assertEquals("Saved content", copy.getContent()); assertEquals(original.getTitle(), copy.getTitle());
+        assertNull(copy.getObject(EditLease.CLASS));
+        assertEquals("xwiki:XWiki.originalEditor", copy.getObject(DraftWorkspace.CLASS).getStringValue("owner"));
+        assertEquals("active", copy.getObject(DraftWorkspace.CLASS).getStringValue("status"));
+        verify(copy).setContentAuthorReference(ref("XWiki.originalAuthor"));
+        verify(copy, never()).setContent(anyString()); verify(copy, never()).setAttachmentList(any());
+        assertNull(EditLease.SAVING.get());
+    }
+    @Test void attachedMigrationPreservesForeignActiveAndExpiredLeasesAndWorkflowStates() throws Exception {
+        for (String state : List.of("draft", "validating", "published")) {
+            for (String expires : List.of("1", Long.toString(System.currentTimeMillis() + EditLease.DURATION))) {
+                var fields = Map.of("owner", "xwiki:XWiki.anotherEditor", "generation", "original-generation", "acquiredAt", "123", "expiresAt", expires);
+                var original = migrationDraft(state, fields, true); var copy = original.clone();
+                saveThroughListener();
+                assertEquals(1, policy.repairExistingDraftRights(context));
+                for (var field : fields.entrySet()) { assertEquals(field.getValue(), EditLease.field(copy, field.getKey())); }
+                assertEquals(state, copy.getObject(WorkflowPolicyListener.WF).getStringValue("status"));
+                assertEquals("abandoned", copy.getObject(DraftWorkspace.CLASS).getStringValue("status"));
+                verify(copy).setHidden(true); assertNull(EditLease.SAVING.get());
+            }
+        }
+    }
+    @Test void migrationTrustIsRemovedAfterFailureAndDoesNotAuthorizeOrdinaryAttachedSaves() throws Exception {
+        var original = migrationDraft("draft", null, false); var copy = original.clone();
+        doAnswer(call -> { assertSame(copy, EditLease.SAVING.get()); throw new IllegalStateException("storage failed"); })
+            .when(wiki).saveDocument(any(XWikiDocument.class), anyString(), anyBoolean(), eq(context));
+        assertThrows(IllegalStateException.class, () -> policy.repairExistingDraftRights(context));
+        assertNull(EditLease.SAVING.get());
+        // A request parameter, administrator identity and a prior migration are never migration authority.
+        when(request.getParameter("migration")).thenReturn("true");
+        assertThrows(SecurityException.class, () -> policy.check(copy, context, false));
+        verify(copy, never()).setContent(anyString());
+    }
+    @Test void migrationRejectsNonAdminBeforeQueryAndSkipsPagesDeletedBeforeGuardedRead() throws Exception {
+        when(policy.authorization.hasAccess(eq(Right.ADMIN), any(), any())).thenReturn(false);
+        assertThrows(SecurityException.class, () -> policy.repairExistingDraftRights(context));
+        verifyNoInteractions(policy.queries);
+        when(policy.authorization.hasAccess(eq(Right.ADMIN), any(), any())).thenReturn(true);
+        queries = statement -> List.of("Drafts.Deleted.WebHome");
+        assertEquals(0, policy.repairExistingDraftRights(context));
+        verify(wiki, never()).saveDocument(any(XWikiDocument.class), anyString(), anyBoolean(), eq(context));
+        assertNull(EditLease.SAVING.get());
     }
 
 }
