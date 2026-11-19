@@ -55,6 +55,19 @@ public class WorkflowPolicyListener implements EventListener
     @Override public void onEvent(Event event, Object source, Object data) {
         if (!(source instanceof XWikiDocument doc) || !(data instanceof XWikiContext context)) { return; }
         try {
+            if (EditLease.scope(doc)) {
+                DraftWriteBoundary.guard(doc.getDocumentReference().toString());
+                XWikiDocument latest = context.getWiki().getDocument(doc.getDocumentReference(), context);
+                XWikiDocument original = doc.getOriginalDocument();
+                boolean exists = !latest.isNew();
+                if (doc.getTranslation() != 0) {
+                    latest = latest.getTranslatedDocument(doc.getLocale(), context);
+                    exists = latest.getTranslation() != 0 && Objects.equals(latest.getLocale(), doc.getLocale()) && !latest.isNew();
+                }
+                require(exists != original.isNew() && (!exists ||
+                    Objects.equals(latest.getVersion(), original.getVersion())),
+                    "The draft changed while this request was waiting. Reload before saving.");
+            }
             check(doc, context, event instanceof DocumentDeletingEvent);
         } catch (Exception error) {
             // Throwing from a listener can be swallowed by ObservationManager. Cancel explicitly.
@@ -70,6 +83,26 @@ public class WorkflowPolicyListener implements EventListener
         XWikiDocument base = doc.getTranslation() == 0 ? doc : context.getWiki().getDocument(ref, context);
         BaseObject previous = doc.getTranslation() == 0 ? old.getObject(WF) : base.getObject(WF);
         BaseObject next = base.getObject(WF);
+        String leaseOperation = workflowOperation();
+        if (EditLease.scope(doc) && !deleting) {
+            if (EditLease.SAVING.get() == doc) { return; } // exact server clone, never an HTTP flag
+            boolean admin = DraftWorkspace.admin(this, context);
+            if (Set.of("createDraftDocument", "editDraft").contains(leaseOperation)) {
+                require(EditLease.OPENING.get(), "Open linked drafts through the protected edit action.");
+                if (doc.getTranslation() == 0) { EditLease.assign(this, doc, context); }
+            } else if (old.isNew() && doc.getTranslation() == 0 && leaseOperation.isEmpty()) {
+                require(doc.getObject(EditLease.CLASS) == null && !protectedObjectChanged(old, doc, context), "Editing rights and security are server-managed.");
+                EditLease.assign(this, doc, context);
+            } else if (leaseOperation.equals("abandonDraft") || leaseOperation.equals("startWorkflow") ||
+                leaseOperation.startsWith("submitFor") || leaseOperation.isEmpty() && !commentsOnly(old, doc, context)) {
+                // Administrative ACL migrations preserve content and the current lease.
+                boolean migration = admin && leaseOperation.isEmpty() && !DraftWorkspace.contentChanged(old, doc) &&
+                    Objects.equals(fieldLease(old), fieldLease(doc));
+                if (!migration) { EditLease.requireOwner(doc.getTranslation() == 0 ? old : base, context); }
+            }
+            if (Set.of("submitForModeration", "submitForValidation", "validate", "publish", "refuseValidation",
+                "withdrawSubmission", "abandonDraft", "restoreDraft").contains(leaseOperation)) { EditLease.clear(doc); }
+        }
         boolean directory = space.equals("XWiki") && (ref.getSpaceReferences().size() == 1 && ref.getName().equals("WebHome") ||
             ref.getSpaceReferences().size() > 1 && ref.getSpaceReferences().get(1).getName().equals("Users"));
         if (directory || IdentityDirectory.isIdentity(doc) || IdentityDirectory.isIdentity(old)) {
@@ -107,6 +140,7 @@ public class WorkflowPolicyListener implements EventListener
             }
             if (!deleting && space.equals("Knowledge") && workflowOperation().equals("publish")) {
                 doc.removeObjects(DraftWorkspace.CLASS);
+                doc.removeObjects(EditLease.CLASS);
             }
             if (!deleting && space.equals("Drafts") && next != null &&
                 Set.of("publish", "editDraft", "createDraftDocument").contains(workflowOperation())) {
@@ -118,6 +152,9 @@ public class WorkflowPolicyListener implements EventListener
                     DraftWorkspace.track(this, doc, old, user, context,
                         Set.of("editDraft", "createDraftDocument").contains(workflowOperation()));
                 }
+            }
+            if (!deleting && EditLease.scope(doc) && doc.getTranslation() == 0) {
+                normalizeDraftRights(doc, status(next), context);
             }
             return;
         }
@@ -152,6 +189,7 @@ public class WorkflowPolicyListener implements EventListener
                 // Never carry draft audit objects into published copies.
                 doc.removeObjects(AUDIT);
                 doc.removeObjects(DraftWorkspace.CLASS);
+                doc.removeObjects(EditLease.CLASS);
                 return;
             }
             require((editor || reviewer) && commentsOnly(old, doc, context),
@@ -214,7 +252,7 @@ public class WorkflowPolicyListener implements EventListener
                     "Article creator identity is immutable.");
                 require(previous == null && next == null || previous != null && next != null,
                     "Workflow objects cannot be created or removed directly.");
-                require(!protectedObjectChanged(old, doc, context), "Workflow, audit and security objects are server-managed.");
+                require(old.isNew() && doc.getTranslation() == 0 && EditLease.scope(doc) || !protectedObjectChanged(old, doc, context), "Workflow, audit and security objects are server-managed.");
                 if (commentsOnly(old, doc, context)) { return; }
                 require(editor && (previous == null || before.equals("draft")),
                     "Only editors may edit draft content; submitted content is locked.");
@@ -222,6 +260,7 @@ public class WorkflowPolicyListener implements EventListener
                 if (!(ref.getSpaceReferences().size() == 1 && ref.getName().equals("WebHome"))) {
                     DraftWorkspace.track(this, doc, old, user, context, false);
                 }
+                if (doc.getTranslation() == 0 && EditLease.scope(doc)) { normalizeDraftRights(doc, after, context); }
                 return;
             default:
                 require(false, "This workflow operation is reserved for administrators.");
@@ -331,11 +370,16 @@ public class WorkflowPolicyListener implements EventListener
     void normalizeDraftRights(XWikiDocument doc, String state, XWikiContext context) throws Exception {
         doc.removeObjects("XWiki.XWikiRights");
         boolean editable = (state.isEmpty() || state.equals("draft")) && !DraftWorkspace.abandoned(doc);
-        right(doc, "XWiki.LuxEditors", editable ? "view,comment,edit" : "view", true, context);
+        right(doc, "XWiki.LuxEditors", "view,comment", true, context);
+        if (editable && EditLease.active(doc)) {
+            BaseObject holder = doc.newXObject(resolver.resolve("XWiki.XWikiRights", doc.getDocumentReference()), context);
+            holder.set("users", EditLease.field(doc, "owner"), context);
+            holder.set("levels", "edit", context); holder.set("allow", 1, context);
+        }
         right(doc, "XWiki.LuxReviewers", "view,comment", true, context);
         // A page-level grant from upstream or creator rights must never expose deletion.
         right(doc, "XWiki.LuxEditors,XWiki.LuxReviewers", "delete", false, context);
-        if (!editable) {
+        if (!editable || !EditLease.active(doc)) {
             right(doc, "XWiki.LuxEditors,XWiki.LuxReviewers", "edit", false, context);
         }
         // No explicit edit DENY for reviewers: that would also block an editor who has both roles.
@@ -395,7 +439,10 @@ public class WorkflowPolicyListener implements EventListener
         new IdentityDirectory(this, context).initialize();
     }
 
-    public String getPolicyVersion() { return "luxpedia-workflow-policy-9"; }
+    private String fieldLease(XWikiDocument doc) {
+        return EditLease.field(doc, "owner") + ":" + EditLease.field(doc, "generation") + ":" + EditLease.field(doc, "expiresAt");
+    }
+    public String getPolicyVersion() { return DraftWriteBoundary.present() ? "luxpedia-workflow-policy-10" : "POLICY_WRITE_BOUNDARY_MISSING"; }
     /** Deployment migration: remove historical validator EDIT grants without re-authoring content. */
     public int repairExistingDraftRights(XWikiContext context) throws Exception {
         require(authorization.hasAccess(Right.ADMIN, context.getUserReference(),

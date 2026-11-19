@@ -46,6 +46,10 @@ class InterfaceRenderingTest {
         final String className;
         Fields(String name, String className) { this.name = name; this.className = className; }
         public String getValue(String field) {
+            if (className.equals(EditLease.CLASS)) {
+                return field.equals("owner") ? name.contains("Other") ? "xwiki:XWiki.other" : "xwiki:XWiki.owner" :
+                    field.equals("expiresAt") ? "4102444800000" : "";
+            }
             if (className.equals(DraftWorkspace.CLASS)) {
                 return switch (field) {
                     case "status" -> name.startsWith("Abandoned ") ? "abandoned" : "active";
@@ -56,7 +60,7 @@ class InterfaceRenderingTest {
             }
             return switch (field) {
                 case "target" -> "Knowledge.Technical." + "LongArticleName".repeat(30);
-                case "status" -> name.startsWith("Published ") || name.startsWith("Restored") ? "published" : name.startsWith("Archived ") ? "archived" : "validating";
+                case "status" -> name.startsWith("Draft ") ? "draft" : name.startsWith("Published ") || name.startsWith("Restored") ? "published" : name.startsWith("Archived ") ? "archived" : "validating";
                 case "description" -> "User category <script>text</script>";
                 default -> "User value | <text>";
             };
@@ -71,6 +75,7 @@ class InterfaceRenderingTest {
         public boolean hasAccessLevel(String right) { return visible; }
         public String getDisplayTitle() { return name; }
         public Fields getObject(String className) {
+            if (className.equals(EditLease.CLASS) && name.contains("No lease")) { return null; }
             if (className.equals("LuxPedia.Code.CategoryClass") && !mode.equals("categories") && !name.startsWith("Category home")) { return null; }
             if (className.equals("LuxPedia.Code.ArticleClass") && name.contains("Legacy")) { return null; }
             return new Fields(name, className);
@@ -285,4 +290,17 @@ class InterfaceRenderingTest {
         assertFalse(html.contains("XWiki.alice")); assertFalse(html.contains("<table"));
         assertFalse(html.contains("<form")); assertFalse(html.contains("$"), html);
     }
+    @Test void draftListShowsLeaseHoldersAndDoesNotReuseAnEarlierRowsLease() throws Exception {
+        for (String language : List.of("en", "zh")) {
+            String html = render("drafts", language, List.of("Draft owner", "Draft Other", "Draft No lease"));
+            var table = parse(html);
+            var spans = table.getElementsByTagName("small");
+            assertEquals(3, spans.getLength());
+            assertEquals("xwiki:XWiki.owner", ((org.w3c.dom.Element) spans.item(0)).getAttribute("data-luxpedia-lease-owner"));
+            assertEquals("xwiki:XWiki.other", ((org.w3c.dom.Element) spans.item(1)).getAttribute("data-luxpedia-lease-owner"));
+            assertEquals("", ((org.w3c.dom.Element) spans.item(2)).getAttribute("data-luxpedia-lease-owner"));
+            assertEquals(1, table.getElementsByTagName("input").getLength());
+        }
+    }
+
 }

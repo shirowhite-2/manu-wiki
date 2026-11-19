@@ -44,6 +44,8 @@
     reuseNativeCategoryField();
     refreshCategoryTree();
     bindDraftWorkspaceList();
+    renderEditLease();
+    renderLeaseList();
     var workspaceAbandoned = workspaceSnapshot && workspaceSnapshot.abandoned && documentReference().startsWith('Drafts.');
     renderArticleMetadata();
     var actions = {
@@ -85,7 +87,7 @@
         if (uiRoles && !uiRoles.admin) {
           var review = ['publish', 'validate', 'refusemoderation', 'refusevalidation'].includes(action.value);
           var write = ['start', 'getEditableDraft', 'editDraft', 'submitformoderation', 'submitforvalidation'].includes(action.value);
-          form.hidden = review ? !uiRoles.reviewer : write ? !uiRoles.editor : true;
+          form.hidden = review ? !uiRoles.reviewer : write ? !uiRoles.editor || documentReference().startsWith('Drafts.') && !leaseCanWrite() : true;
         }
       });
       var summary = panel.querySelector('.luxpedia-workflow-summary');

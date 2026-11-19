@@ -67,7 +67,7 @@ class FakeWiki:
     def request(self, method, path, data=None, content_type=None, **kwargs):
         self.requests.append((method, path, data))
         if 'PolicyStatus?' in path:
-            return 200, b'luxpedia-workflow-policy-9' if self.policy else b'POLICY_NOT_INSTALLED'
+            return 200, b'luxpedia-workflow-policy-10' if self.policy else b'POLICY_NOT_INSTALLED'
         if 'PolicySetup?' in path:
             return 200, b'AUDIT_CLASS_READY'
         if '/translations/' in path:

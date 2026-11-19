@@ -66,6 +66,7 @@ WORKFLOW_UX_JS = r"""(function () {
   var categoryFields = new WeakMap();
 
   /* LUXPEDIA_WORKFLOW_PANEL */
+  /* LUXPEDIA_EDIT_LOCK */
   /* LUXPEDIA_DRAFT_ACTIONS */
   /* LUXPEDIA_CATEGORY_PICKER */
   /* LUXPEDIA_DRAFT_WORKSPACE */
@@ -419,6 +420,7 @@ WORKFLOW_UX_JS = r"""(function () {
 
   function workflowFormSubmit(form) {
     if (!form) { return false; }
+    stampLeaseForm(form);
     var submit = form.querySelector('input[type="submit"],button[type="submit"]');
     if (!submit) { return false; }
     submit.click();
@@ -453,6 +455,13 @@ WORKFLOW_UX_JS = r"""(function () {
   }
 
   function continuePendingSubmission(reference) {
+    if (reference.startsWith('Drafts.') && reference !== 'Drafts.WebHome' && !leaseCanWrite()) {
+      if (leaseSnapshot) {
+        sessionStorage.removeItem(PREFIX + reference);
+        if (leaseSnapshot.status === 'locked') { sessionStorage.removeItem(PREFIX + reference + '.category'); }
+      }
+      return Promise.resolve();
+    }
     var key = PREFIX + reference;
     if (sessionStorage.getItem(key) !== '1' || busy || !uiRoles || (!uiRoles.editor && !uiRoles.admin)) { return; }
     var params = new URLSearchParams(location.search);
@@ -635,6 +644,7 @@ WORKFLOW_UX_JS = r"""(function () {
     currentRoles().then(function (roles) {
       initPending = false;
       uiRoles = roles;
+      initEditLease();
       translateWorkflowUI();
       if (!roles.editor && !roles.admin) { return; }
       initializedReference = reference;
@@ -684,6 +694,7 @@ WORKFLOW_UX_JS = r"""(function () {
 
 WORKFLOW_UX_JS = I18N_JS + WORKFLOW_UX_JS.replace(
     '/* LUXPEDIA_WORKFLOW_PANEL */', (UI / 'workflow_panel.js').read_text()).replace(
+    '/* LUXPEDIA_EDIT_LOCK */', (UI / 'edit_lock.js').read_text()).replace(
     '/* LUXPEDIA_DRAFT_ACTIONS */', (UI / 'draft_actions.js').read_text()).replace(
     '/* LUXPEDIA_CATEGORY_PICKER */', (UI / 'category_picker.js').read_text()).replace(
     '/* LUXPEDIA_DRAFT_WORKSPACE */', (UI / 'draft_workspace.js').read_text())

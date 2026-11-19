@@ -106,6 +106,7 @@ class WorkflowPolicyListenerTest {
         when(diff.getXClassReference()).thenReturn(ref(name));
         when(doc.getObjectDiff(old, doc, context)).thenReturn(List.of(List.of(diff)));
     }
+    @org.junit.jupiter.api.AfterEach void clearLeaseScope() { EditLease.OPENING.remove(); }
     @BeforeEach void setup() throws Exception {
         policy = new Subject();
         policy.authorization = mock(AuthorizationManager.class);
@@ -130,6 +131,16 @@ class WorkflowPolicyListenerTest {
         when(old.getContentAuthorReference()).thenReturn(ref("XWiki.contentAuthor"));
         when(doc.getOriginalDocument()).thenReturn(old);
         group("Editors");
+        EditLease.OPENING.set(true);
+        var request = mock(com.xpn.xwiki.web.XWikiRequest.class);
+        when(context.getRequest()).thenReturn(request);
+        when(request.getHeader("X-LuxPedia-Edit-Lease")).thenReturn("lease-fixture");
+        BaseObject lease = mock(BaseObject.class);
+        when(lease.getStringValue("owner")).thenReturn(user.toString());
+        when(lease.getStringValue("generation")).thenReturn("lease-fixture");
+        when(lease.getStringValue("expiresAt")).thenReturn(Long.toString(System.currentTimeMillis() + EditLease.DURATION));
+        when(old.getObject(EditLease.CLASS)).thenReturn(lease);
+        when(doc.getObject(EditLease.CLASS)).thenReturn(lease);
     }
     void profile(String account) throws Exception {
         old = document("XWiki." + account); doc = document("XWiki." + account);
@@ -195,6 +206,7 @@ class WorkflowPolicyListenerTest {
     }
     @Test void editorCanCreateANestedDraftWithCoreEditAccess() throws Exception {
         when(old.isNew()).thenReturn(true);
+        when(doc.getObject(EditLease.CLASS)).thenReturn(null);
         when(policy.authorization.hasAccess(Right.EDIT, user, doc.getDocumentReference())).thenReturn(true);
         assertDoesNotThrow(() -> policy.check(doc, context, false));
     }
@@ -612,4 +624,52 @@ class WorkflowPolicyListenerTest {
         verify(wiki).getDocument(expected, context);
         verify(draft, atLeastOnce()).newXObject(new DocumentReference("secondary", "XWiki", "XWikiRights"), context);
     }
+    @Test void expiredOrForeignLeasesFenceOrdinarySavesAndWorkflowSubmission() throws Exception {
+        states("draft", "draft");
+        BaseObject lease = old.getObject(EditLease.CLASS);
+        when(lease.getStringValue("expiresAt")).thenReturn("1");
+        assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
+        policy.operation = "submitForValidation"; states("draft", "validating");
+        assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
+        when(lease.getStringValue("expiresAt")).thenReturn(Long.toString(System.currentTimeMillis() + EditLease.DURATION));
+        when(lease.getStringValue("owner")).thenReturn(ref("XWiki.someoneElse").toString());
+        assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
+    }
+    @Test void anAdministratorMustAcquireTheLeaseBeforeChangingSomeoneElsesDraftContent() throws Exception {
+        when(policy.authorization.hasAccess(eq(Right.ADMIN), any(), any())).thenReturn(true);
+        states("draft", "draft");
+        when(old.getContent()).thenReturn("saved"); when(doc.getContent()).thenReturn("changed");
+        when(old.getObject(EditLease.CLASS).getStringValue("owner")).thenReturn(ref("XWiki.someoneElse").toString());
+        assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
+    }
+    @Test void clientSuppliedLeaseObjectsAndUnprotectedNativeReopenCannotBypassOwnership() throws Exception {
+        states("draft", "draft"); changedClass(EditLease.CLASS);
+        assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
+        EditLease.OPENING.remove(); policy.operation = "editDraft"; states("published", "draft");
+        assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
+    }
+
+    @Test void aWriterLoadedBeforeTakeoverCannotCommitAfterTheDocumentVersionChanges() throws Exception {
+        states("draft", "draft"); when(old.getVersion()).thenReturn("4.2");
+        var latest = document("Drafts.Article.WebHome"); when(latest.getVersion()).thenReturn("4.3");
+        try (var boundary = DraftWriteBoundary.open()) {
+            var event = new DocumentUpdatingEvent(); policy.onEvent(event, doc, context);
+            assertTrue(event.isCanceled());
+        }
+    }
+    @Test void aNewTranslationUsesTheDefaultDraftLeaseWithoutCreatingASecondLease() throws Exception {
+        when(old.isNew()).thenReturn(true);
+        when(doc.getTranslation()).thenReturn(1); when(doc.getLocale()).thenReturn(java.util.Locale.CHINESE);
+        var base = document("Drafts.Article.WebHome");
+        when(base.getTranslatedDocument(java.util.Locale.CHINESE, context)).thenReturn(base);
+        BaseObject baseFlow = object("draft"), baseLease = old.getObject(EditLease.CLASS);
+        when(base.getObject(WorkflowPolicyListener.WF)).thenReturn(baseFlow);
+        when(base.getObject(EditLease.CLASS)).thenReturn(baseLease);
+        try (var boundary = DraftWriteBoundary.open()) {
+            var event = new org.xwiki.bridge.event.DocumentCreatingEvent(); policy.onEvent(event, doc, context);
+            assertFalse(event.isCanceled());
+            verify(doc, never()).newXObject(eq(ref(EditLease.CLASS)), eq(context));
+        }
+    }
+
 }

@@ -223,5 +223,19 @@
   "favoritesPageUnavailable": "Open an existing article you can view before adding it to favorites.",
   "favoritesLoading": "Loading favorites. Please wait…",
   "favoritesMenuAdd": "Add to favorites",
-  "favoritesMenuRemove": "Remove from favorites"
+  "favoritesMenuRemove": "Remove from favorites",
+  "leaseOwned": "You are editing this draft. Editing right expires at {time}; saving does not extend it.",
+  "leaseBusy": "{owner} is editing this draft until {time}. You can read the saved content.",
+  "leaseLost": "Your editing right has ended. Keep or copy your unsaved text before leaving; this page cannot save over another editor’s work.",
+  "leaseFree": "This saved draft is available. Resume it to acquire editing right for up to 24 hours.",
+  "leaseLocked": "This draft is in review, published or abandoned. Follow the workflow before editing.",
+  "leaseClaim": "Resume editing",
+  "leaseRelease": "Release editing right",
+  "leaseSaveRelease": "Save and release editing right",
+  "leaseForce": "Force release",
+  "leaseForceConfirm": "Release the current editor’s right? Saved content is preserved; their unsaved changes cannot be saved afterwards.",
+  "leaseUnavailable": "Cannot acquire editing right. Reload or ask an administrator to check the workflow policy.",
+  "leaseKeepText": "Copy your unsaved text first, then reload the draft and explicitly resume editing.",
+  "leaseListBusy": "{owner} · editing until {time}",
+  "leaseListFree": "Available to resume"
 }

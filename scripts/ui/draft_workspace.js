@@ -3,10 +3,14 @@
   var WORKSPACE_URL = '/bin/get/LuxPedia/Workflow/DraftWorkspace?outputSyntax=plain';
 
   function manageWorkspace(reference, version, operation) {
-    return freshFormToken().then(function (token) {
+    var acquireGeneration = operation === 'abandon' && !leaseGeneration(reference) ? leaseRequest(reference).then(function (value) {
+      if (value.status !== 'owned' || !value.generation) { throw new Error('Editing right required'); }
+      sessionStorage.setItem(leaseKey(reference), value.generation);
+    }) : Promise.resolve();
+    return acquireGeneration.then(freshFormToken).then(function (token) {
       return fetch(WORKSPACE_URL, { method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ reference: reference, version: version, operation: operation, form_token: token }).toString()
+        body: new URLSearchParams({ reference: reference, version: version, operation: operation, form_token: token, luxpedia_edit_lease: leaseGeneration(reference) }).toString()
       });
     }).then(actionResponse).then(function (result) {
       if (result !== (operation === 'restore' ? 'DRAFT_RESTORED' : 'DRAFT_ABANDONED')) { throw new Error(result); }

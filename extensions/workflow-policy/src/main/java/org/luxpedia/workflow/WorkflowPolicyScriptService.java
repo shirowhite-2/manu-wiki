@@ -27,6 +27,7 @@ public class WorkflowPolicyScriptService implements ScriptService
     @Inject Execution execution;
     @Inject AuthorizationManager authorization;
     @Inject CSRFToken csrf;
+    @Inject org.xwiki.script.service.ScriptServiceManager services;
     @Inject @Named("luxpedia-workflow-policy") EventListener listener;
 
     XWikiContext context() {
@@ -81,6 +82,21 @@ public class WorkflowPolicyScriptService implements ScriptService
         catch (Exception error) { return java.util.Map.of("status", "unavailable"); }
     }
 
+    /** JSON-compatible result; all references are resolved and authorized again on the server. */
+    public java.util.Map<String, Object> editLease(String name) {
+        try { return new EditLeaseManager((WorkflowPolicyListener) listener, context(), services).read(name); }
+        catch (Exception error) { return java.util.Map.of("status", "unavailable"); }
+    }
+    public java.util.Map<String, Object> manageEditLease(String name, String operation, String token) {
+        XWikiContext context = context();
+        if (context.getRequest() == null || !"POST".equals(context.getRequest().getMethod())) {
+            return java.util.Map.of("status", "post_required");
+        }
+        if (!csrf.isTokenValid(token)) { return java.util.Map.of("status", "bad_token"); }
+        try { return new EditLeaseManager((WorkflowPolicyListener) listener, context, services).change(name, operation); }
+        catch (Exception error) { return java.util.Map.of("status", "unavailable"); }
+    }
+
     public String initialize(String token) throws Exception {
         XWikiContext context = context();
         if (!administrator(context)) { return "POLICY_FORBIDDEN"; }
@@ -88,6 +104,7 @@ public class WorkflowPolicyScriptService implements ScriptService
             return "POLICY_POST_REQUIRED";
         }
         if (!csrf.isTokenValid(token)) { return "POLICY_BAD_TOKEN"; }
+        DraftWriteBoundary.guard("policy-setup:" + context.getWikiId());
         DocumentReference reference = new DocumentReference(context.getWikiId(), List.of("LuxPedia", "Code"), "ReviewAuditClass");
         XWikiDocument audit = context.getWiki().getDocument(reference, context).clone();
         BaseClass schema = audit.getXClass();
@@ -104,6 +121,13 @@ public class WorkflowPolicyScriptService implements ScriptService
             if (workspaceClass.get(field) == null) { workspaceChanged |= workspaceClass.addTextField(field, field, 100); }
         }
         if (workspaceChanged) { context.getWiki().saveDocument(workspaceSchema, "Ensure draft workspace fields", true, context); }
+        XWikiDocument leaseSchema = context.getWiki().getDocument(new DocumentReference(context.getWikiId(),
+            List.of("LuxPedia", "Code"), "EditLeaseClass"), context).clone();
+        boolean leaseChanged = false;
+        for (String field : List.of("owner", "acquiredAt", "expiresAt", "generation")) {
+            if (leaseSchema.getXClass().get(field) == null) { leaseChanged |= leaseSchema.getXClass().addTextField(field, field, 100); }
+        }
+        if (leaseChanged) { context.getWiki().saveDocument(leaseSchema, "Ensure persistent editing lease fields", true, context); }
         ((WorkflowPolicyListener) listener).repairExistingDraftRights(context);
         ((WorkflowPolicyListener) listener).registerExistingKnowledgeTargets(context);
         ((WorkflowPolicyListener) listener).repairIdentityPrivacy(context);
@@ -139,12 +163,16 @@ public class WorkflowPolicyScriptService implements ScriptService
         if (context.getRequest() == null || !"POST".equals(context.getRequest().getMethod())) { return "POLICY_POST_REQUIRED"; }
         if (!csrf.isTokenValid(token)) { return "POLICY_BAD_TOKEN"; }
         if (!List.of("abandon", "restore").contains(operation == null ? "" : operation)) { return "WORKSPACE_FORBIDDEN"; }
+        DocumentReference locked = ((WorkflowPolicyListener) listener).resolver.resolve(name, new WikiReference(context.getWikiId()));
+        DraftWriteBoundary.guard(locked.toString());
         XWikiDocument original = workspaceDraft(name);
         var policy = (WorkflowPolicyListener) listener;
         boolean restore = operation.equals("restore");
         if (original == null || !DraftWorkspace.allowed(policy, original, context, restore)) { return "WORKSPACE_FORBIDDEN"; }
         if (!original.getVersion().equals(version)) { return "WORKSPACE_CONFLICT"; }
+        if (!restore) { EditLease.requireOwner(original, context); }
         XWikiDocument draft = original.clone();
+        EditLease.clear(draft);
         var workspace = draft.getObject(DraftWorkspace.CLASS);
         if (workspace == null) {
             DraftWorkspace.track(policy, draft, original, context.getUserReference(), context, false);
@@ -183,11 +211,14 @@ public class WorkflowPolicyScriptService implements ScriptService
             return "POLICY_POST_REQUIRED";
         }
         if (!csrf.isTokenValid(token)) { return "POLICY_BAD_TOKEN"; }
+        DocumentReference locked = ((WorkflowPolicyListener) listener).resolver.resolve(name, new WikiReference(context.getWikiId()));
+        DraftWriteBoundary.guard(locked.toString());
         XWikiDocument original = withdrawalDraft(name, context);
         if (original == null) { return "WITHDRAW_FORBIDDEN"; }
         if (!original.getVersion().equals(version)) { return "WITHDRAW_CONFLICT"; }
         XWikiDocument draft = original.clone();
         draft.getObject(WorkflowPolicyListener.WF).set("status", "draft", context);
+        EditLease.clear(draft);
         ((WorkflowPolicyListener) listener).normalizeDraftRights(draft, "draft", context);
         draft.setHidden(false);
         draft.setContentAuthorReference(original.getContentAuthorReference());

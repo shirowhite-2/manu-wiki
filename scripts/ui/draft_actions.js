@@ -14,65 +14,20 @@
       return new DOMParser().parseFromString(body, 'text/html').body.textContent.trim();
     });
   }
-  function linkedDraftLocation() {
-    var forms = document.querySelectorAll('.publicationworkflow-info form, .publicationworkflow-information form');
-    for (var form of forms) {
-      if ((form.getAttribute('method') || 'get').toLowerCase() !== 'get') { continue; }
-      var url;
-      try { url = new URL(form.getAttribute('action') || '', location.href); } catch (error) { continue; }
-      if (url.origin !== location.origin || !url.pathname.startsWith('/bin/view/Drafts/')) { continue; }
-      var parts = url.pathname.slice('/bin/view/'.length).split('/').filter(Boolean);
-      if (url.pathname.endsWith('/')) { parts.push('WebHome'); }
-      if (parts.length < 2 || parts.length === 2 && parts[1] === 'WebHome') { continue; }
-      // Use URL segments, preserving literal dots and escaped names in page names.
-      var page = parts.pop();
-      var rest = parts.map(function (part) { return 'spaces/' + encodeURIComponent(decodeURIComponent(part)); }).join('/') +
-        '/pages/' + encodeURIComponent(decodeURIComponent(page));
-      return { url: url, rest: rest };
-    }
-    return null;
-  }
-
-  function requestFreshDraft(reference) {
-    // A stale page can retain a link to a draft that an administrator deleted.
-    // Ask the native workflow to find or recreate it; never synthesize or overwrite content.
-    if (!draftActionsSnapshot || draftActionsSnapshot.status !== 'published') {
-      return Promise.reject(new Error('Target is not published'));
-    }
-    return freshFormToken().then(function (token) {
-      if (!token) { throw new Error('Missing form token'); }
-      var form = document.createElement('form');
-      form.method = 'post'; form.action = '/bin/view/PublicationWorkflow/Script'; form.hidden = true;
-      var fields = { action: 'getEditableDraft', workflowdoc: reference, form_token: token };
-      Object.keys(fields).forEach(function (name) {
-        var input = document.createElement('input'); input.type = 'hidden'; input.name = name; input.value = fields[name];
-        form.appendChild(input);
-      });
-      document.body.appendChild(form); form.submit();
-    });
-  }
-
   function openKnowledgeDraft(reference) {
-    actionPending = true;
-    sessionStorage.setItem(EDIT_TARGET, reference.replace(/^xwiki:/, ''));
-    renderDraftActions();
-    var form = workflowActionForm(['getEditableDraft', 'editDraft']);
-    if (form && workflowFormSubmit(form)) { return; }
-    var linked = linkedDraftLocation();
-    var open = linked ? fetch(REST + linked.rest, {
-      credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' }
-    }).then(function (response) {
-      if (response.status === 404) { return requestFreshDraft(reference); }
-      if (!response.ok) {
-        var error = new Error('HTTP ' + response.status); error.status = response.status; throw error;
+    if (actionPending) { return; }
+    actionPending = true; renderDraftActions();
+    leaseRequest(reference, 'open').then(function (value) {
+      if (value.status === 'owned') {
+        acceptLease(value, true); location.assign(value.editURL); return;
       }
-      location.assign(linked.url.href);
-    }) : requestFreshDraft(reference);
-    open.catch(function (error) {
-      actionPending = false; sessionStorage.removeItem(EDIT_TARGET);
-      window.alert(t(error.status === 401 || error.status === 403 ? 'draftAccessDenied' : 'draftOpenFailed'));
-      renderDraftActions();
-    });
+      if (['busy', 'locked'].includes(value.status) && value.viewURL) {
+        if (value.status === 'busy') { window.alert(t('leaseBusy').replace('{owner}', value.owner || '')
+          .replace('{time}', value.expiresAt ? new Date(Number(value.expiresAt)).toLocaleString() : '')); }
+        location.assign(value.viewURL); return;
+      }
+      throw new Error('Unavailable');
+    }).catch(function () { actionPending = false; window.alert(t('leaseUnavailable')); renderDraftActions(); });
   }
 
   function renderDraftActions() {
@@ -115,10 +70,10 @@
     if (draft && sessionStorage.getItem(EDIT_TARGET) &&
         sessionStorage.getItem(EDIT_TARGET) === draftActionsSnapshot.target.replace(/^xwiki:/, '')) {
       sessionStorage.removeItem(EDIT_TARGET);
-      if (state === 'draft' && !abandoned) { location.assign(location.href.replace('/bin/view/', '/bin/edit/')); return; }
+      if (state === 'draft' && !abandoned && leaseCanWrite()) { location.assign(location.href.replace('/bin/view/', '/bin/edit/')); return; }
     }
     var editable = draft && !abandoned && ['unstarted', 'draft'].includes(state);
-    if (editable && sessionStorage.getItem(PREVIEW_PREFIX + reference) === '1' && !previewSaving && !previewSaved) {
+    if (editable && leaseCanWrite() && sessionStorage.getItem(PREVIEW_PREFIX + reference) === '1' && !previewSaving && !previewSaved) {
       previewSaving = true;
       var selected = readChosenCategory(reference);
       var persist = saveChosenCategory(reference, selected);
@@ -128,6 +83,7 @@
         sessionStorage.removeItem(PREVIEW_PREFIX + reference);
         if (!saved) { window.alert(t('categorySaveFailed')); }
         renderDraftActions();
+        if (saved) { releaseAfterPreview(reference); }
       });
     }
     var card = document.getElementById('luxpedia-draft-actions');
@@ -137,7 +93,7 @@
       card.innerHTML = '<strong></strong><p></p><div class="luxpedia-draft-buttons"></div>';
       content.parentNode.insertBefore(card, content);
     }
-    card.hidden = !editable && !knowledge && !withdrawVersion && !abandoned;
+    card.hidden = (!editable || !leaseCanWrite()) && !knowledge && !withdrawVersion && !abandoned;
     text(card.querySelector('strong'), t(abandoned ? 'abandonedTitle' : knowledge ? 'editArticle' : editable ? 'previewTitle' : 'pendingTitle'));
     text(card.querySelector('p'), t(abandoned ? 'abandonedHint' : knowledge ? 'editArticleHint' : editable ? 'previewHint' : 'withdrawHint'));
     var buttons = card.querySelector('.luxpedia-draft-buttons');
@@ -158,12 +114,12 @@
       document.querySelectorAll('.publicationworkflow-info form, .publicationworkflow-information form').forEach(function (form) { form.hidden = true; });
     } else if (editable) {
       button('luxpedia-submit-review', 'submit', function () {
-        if (busy || previewSaving) { return; }
+        if (busy || previewSaving || !leaseCanWrite()) { return; }
         sessionStorage.setItem(PREFIX + reference, '1');
         continuePendingSubmission(reference); renderDraftActions();
       }, true);
       button('luxpedia-continue-editing', 'continueEditing', function () {
-        location.assign(location.href.replace('/bin/view/', '/bin/edit/'));
+        claimAndEdit(reference);
       }, false);
       if (workspaceSnapshot.abandon) {
         button('luxpedia-abandon-draft', 'abandonDraft', function () { workspaceButtonAction(reference, 'abandon'); }, false);
@@ -216,4 +172,5 @@
         });
       }, false);
     }
+    renderEditLease();
   }

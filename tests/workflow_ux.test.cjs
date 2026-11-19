@@ -41,6 +41,7 @@ async function wikiFixture(options = {}) {
     target: options.linkedTarget || '',
     category: options.primaryCategory || '',
     hasArticle: options.hasArticle !== false,
+    leaseStatus: options.leaseStatus || 'owned', leaseGeneration: 'lease-fixture', leaseActions: [], savedHeaders: [], leaseExpiresAt: Date.now() + 86400000,
     actions: [], alerts: [], errors: [], withdrawals: [], workspaceActions: [], confirmations: 0,
   };
   const workspaceStates = { [reference]: !!options.abandoned };
@@ -113,6 +114,36 @@ async function wikiFixture(options = {}) {
       return route.fulfill({ contentType: pathname.endsWith('.css') ? 'text/css' : 'text/javascript', body: nativeAssets[pathname] });
     }
     const json = body => route.fulfill({ json: body });
+    if (pathname === '/bin/get/LuxPedia/Workflow/EditLock') {
+      const fields = Object.fromEntries(new URLSearchParams(request.postData()));
+      const name = fields.reference || url.searchParams.get('reference');
+      let leaseState = state.leaseStatus;
+      if (request.method() === 'POST') {
+        assert.equal(fields.form_token, 'test-token');
+        state.leaseActions.push(fields);
+        if (fields.operation === 'open') {
+          if (options.draftLookupStatus && options.draftLookupStatus !== 404) { return json({ status: 'unavailable' }); }
+          if (!options.existingDraftState || options.draftLookupStatus === 404) {
+            state.actions.push({ action: 'getEditableDraft', workflowdoc: name, form_token: fields.form_token });
+          }
+          reference = linkedDraftReference; viewPath = linkedDraftPath; editPath = viewPath.replace('/view/', '/edit/');
+          state.status = options.existingDraftState && options.draftLookupStatus !== 404 ? options.existingDraftState : 'draft';
+        } else if (fields.operation === 'claim' && state.leaseStatus === 'free') {
+          state.leaseStatus = 'owned'; state.leaseGeneration = 'next-lease';
+        } else if (['release', 'force-release'].includes(fields.operation)) {
+          assert.equal(fields.luxpedia_edit_lease, state.leaseGeneration); state.leaseStatus = 'free';
+        }
+        leaseState = state.leaseStatus;
+      }
+      if (['validating', 'valid', 'published', 'archived'].includes(state.status) || workspaceStates[name]) { leaseState = 'locked'; }
+      return json({ status: leaseState, reference: fields.operation === 'open' ? reference : name,
+        owner: leaseState === 'busy' ? 'xwiki:XWiki.otherEditor' : 'xwiki:XWiki.editor',
+        expiresAt: leaseState === 'free' ? '' : String(state.leaseExpiresAt),
+        generation: leaseState === 'owned' || options.admin ? state.leaseGeneration : '',
+        canClaim: !['reader', 'reviewer'].includes(options.role) && ['free', 'owned'].includes(leaseState),
+        canForce: !!options.admin && ['owned', 'busy'].includes(leaseState),
+        viewURL: viewPath, editURL: editPath });
+    }
     if (pathname === '/bin/get/LuxPedia/Workflow/DraftWorkspace') {
       const name = url.searchParams.get('reference');
       const actor = options.admin || !['reviewer', 'reader'].includes(options.role);
@@ -128,7 +159,7 @@ async function wikiFixture(options = {}) {
       const restoring = fields.operation === 'restore';
       if (!actor || !['', 'draft'].includes(state.status) || restoring !== !!workspaceStates[fields.reference] ||
           !restoring && !canAbandon) { return route.fulfill({ body: 'WORKSPACE_FORBIDDEN' }); }
-      workspaceStates[fields.reference] = !restoring;
+      workspaceStates[fields.reference] = !restoring; if (fields.reference === reference) { state.leaseStatus = 'free'; }
       return route.fulfill({ body: restoring ? 'DRAFT_RESTORED' : 'DRAFT_ABANDONED' });
     }
     if (pathname === '/bin/get/LuxPedia/Workflow/Actions') {
@@ -140,7 +171,7 @@ async function wikiFixture(options = {}) {
       if (options.withdrawFail || fields.version !== '4.2' || fields.form_token !== 'test-token') {
         return route.fulfill({ body: 'WITHDRAW_CONFLICT' });
       }
-      state.status = 'draft'; return route.fulfill({ body: 'WITHDRAWN' });
+      state.status = 'draft'; state.leaseStatus = 'free'; return route.fulfill({ body: 'WITHDRAWN' });
     }
     if (pathname.endsWith('/PublicationWorkflow/Script')) {
       const fields = Object.fromEntries(new URLSearchParams(request.postData()));
@@ -192,6 +223,10 @@ async function wikiFixture(options = {}) {
       editPath = viewPath.replace('/view/', '/edit/');
       state.status = options.existingDraftState;
     }
+    if (pathname.startsWith('/rest/') && pathname.endsWith('/attachments/probe.png') && request.method() === 'POST') {
+      const generation = request.headers()['x-luxpedia-edit-lease']; state.savedHeaders.push(generation);
+      return route.fulfill({ status: generation === state.leaseGeneration && state.leaseStatus === 'owned' ? 200 : 403, body: 'probe' });
+    }
     if (pathname.startsWith('/rest/')) {
       const linkedParts = linkedDraftPath.slice('/bin/view/'.length).split('/').filter(Boolean);
       if (linkedDraftPath.endsWith('/')) { linkedParts.push('WebHome'); }
@@ -238,7 +273,7 @@ async function wikiFixture(options = {}) {
     for await (const chunk of request) { body += chunk; }
     try {
       await handle({
-        request: () => ({ url: () => origin + request.url,
+        request: () => ({ url: () => origin + request.url, headers: () => request.headers,
           method: () => request.method, postData: () => body }),
         fulfill: async result => {
           response.writeHead(result.status || 200, { ...result.headers,
@@ -780,7 +815,8 @@ test('submitter can withdraw a pending request using POST and CSRF then edit aga
   try {
     await wiki.page.goto(wiki.origin + '/bin/view/Drafts/NewArticle/WebHome');
     await wiki.page.locator('#luxpedia-withdraw-review').click();
-    await wiki.page.locator('#luxpedia-continue-editing').waitFor();
+    await wiki.page.locator('#luxpedia-claim-edit').click();
+    await wiki.page.waitForURL(/\/bin\/edit\/Drafts\//);
     assert.equal(wiki.state.status, 'draft');
     assert.equal(wiki.state.withdrawals.length, 1);
     assert.equal(wiki.state.withdrawals[0].reference, 'Drafts.NewArticle.WebHome');
@@ -899,7 +935,7 @@ for (const status of [401, 403, 500]) {
       await wiki.page.goto(wiki.origin + '/bin/view/Knowledge/Technical/Article');
       await wiki.page.locator('#luxpedia-edit-article').click();
       await wiki.page.waitForFunction(() => !document.querySelector('#luxpedia-edit-article').disabled);
-      assert.match(wiki.state.alerts[0], status === 401 || status === 403 ? /do not have permission/i : /draft could not be opened/i);
+      assert.match(wiki.state.alerts[0], /Cannot acquire editing right/i);
       assert.match(wiki.page.url(), /Knowledge\/Technical\/Article/);
       assert.deepEqual(wiki.state.actions, []);
       assert.deepEqual(wiki.state.errors, []);
@@ -925,7 +961,8 @@ test('owner can abandon and restore a saved draft without publishing or deleting
     assert.equal(await wiki.page.locator('#luxpedia-submit-review').count(), 0);
     assert.equal(await wiki.page.locator('#luxpedia-continue-editing').count(), 0);
     await wiki.page.locator('#luxpedia-restore-draft').click();
-    await wiki.page.locator('#luxpedia-submit-review').waitFor();
+    await wiki.page.locator('#luxpedia-claim-edit').click();
+    await wiki.page.waitForURL(/\/bin\/edit\/Drafts\//);
     assert.deepEqual(wiki.state.workspaceActions.map(action => action.operation), ['abandon', 'restore']);
     assert.deepEqual(wiki.state.actions, []);
     assert.equal(await wiki.page.locator('#user-content').textContent(), '用户撰写的正文 stays unchanged.');
@@ -1056,5 +1093,93 @@ test('writing-area home is editable without being treated as a publication draft
     assert.equal(await wiki.page.locator('#luxpedia-publish-category').count(), 0);
     assert.equal(await wiki.page.locator('.realtime-action-done').getAttribute('data-luxpedia-preview-bound'), null);
     assert.equal(wiki.state.actions.length, 0);
+  } finally { await wiki.context.close(); }
+});
+
+test('a second editor can read the shared draft but cannot save or submit it', async () => {
+  const wiki = await wikiFixture({ status: 'draft', linkedTarget: 'Knowledge.Article', leaseStatus: 'busy', nativeEdit: true });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/view/Drafts/NewArticle/WebHome');
+    await wiki.page.locator('#luxpedia-edit-lease').waitFor();
+    assert.match(await wiki.page.locator('#luxpedia-edit-lease p').textContent(), /otherEditor.*editing/);
+    assert.equal(await wiki.page.locator('#luxpedia-submit-review').isVisible(), false);
+    await wiki.page.locator('#tmEdit').click();
+    assert.match(wiki.page.url(), /\/bin\/view\/Drafts\//);
+    assert.equal(wiki.state.leaseActions.length, 0);
+    await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
+    await wiki.page.locator('#luxpedia-edit-lease').waitFor();
+    assert.equal(await wiki.page.locator('.realtime-action-done').isDisabled(), true);
+  } finally { await wiki.context.close(); }
+});
+
+test('a free draft is explicitly claimed and opens the same saved draft', async () => {
+  const wiki = await wikiFixture({ status: 'draft', linkedTarget: 'Knowledge.Article', leaseStatus: 'free' });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/view/Drafts/NewArticle/WebHome');
+    await wiki.page.locator('#luxpedia-claim-edit').click();
+    await wiki.page.waitForURL(/\/bin\/edit\/Drafts\/NewArticle\/WebHome/);
+    await wiki.page.locator('#luxpedia-edit-lease').waitFor();
+    assert.equal(wiki.state.leaseActions.length, 1);
+    assert.equal(wiki.state.leaseActions[0].operation, 'claim');
+    assert.equal(await wiki.page.evaluate(() => sessionStorage.getItem('luxpedia.workflow.lease.XWiki.editor.Drafts.NewArticle.WebHome')), 'next-lease');
+    assert.equal(wiki.state.actions.length, 0);
+  } finally { await wiki.context.close(); }
+});
+
+test('losing a lease keeps the unsaved buffer and never adopts a newer generation silently', async () => {
+  const wiki = await wikiFixture({ status: 'draft', linkedTarget: 'Knowledge.Article' });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
+    await wiki.page.locator('#luxpedia-edit-lease').waitFor();
+    await wiki.page.locator('#xwikieditor').fill('Keep my unfinished content');
+    wiki.state.leaseGeneration = 'new-session-generation';
+    await wiki.page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await wiki.page.waitForFunction(() => document.querySelector('#luxpedia-edit-lease p')?.textContent.includes('has ended'));
+    assert.equal(await wiki.page.locator('#xwikieditor').inputValue(), 'Keep my unfinished content');
+    assert.equal(await wiki.page.locator('.realtime-action-done').isDisabled(), true);
+    assert.equal(await wiki.page.evaluate(() => sessionStorage.getItem('luxpedia.workflow.lease.XWiki.editor.Drafts.NewArticle.WebHome')), 'lease-fixture');
+  } finally { await wiki.context.close(); }
+});
+
+test('save and release persists preview metadata before releasing the editing right', async () => {
+  const wiki = await wikiFixture({ status: 'draft', linkedTarget: 'Knowledge.Article' });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
+    await wiki.page.locator('#luxpedia-save-release').click();
+    await wiki.page.waitForFunction(() => document.querySelector('#luxpedia-edit-lease p')?.textContent.includes('available'));
+    assert.equal(wiki.state.leaseActions.filter(action => action.operation === 'release').length, 1);
+    assert.equal(wiki.state.leaseActions[0].luxpedia_edit_lease, 'lease-fixture');
+    assert.equal(wiki.state.status, 'draft');
+    assert.equal(wiki.state.actions.length, 0);
+  } finally { await wiki.context.close(); }
+});
+
+test('both fetch and native AJAX attachment writes carry the captured lease generation', async () => {
+  const wiki = await wikiFixture({ status: 'draft', linkedTarget: 'Knowledge.Article' });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
+    await wiki.page.locator('#luxpedia-edit-lease').waitFor();
+    const probe = '/rest/wikis/xwiki/spaces/Drafts/spaces/NewArticle/pages/WebHome/attachments/probe.png';
+    assert.equal(await wiki.page.evaluate(async url => (await fetch(url, { method: 'POST', body: 'file' })).status, probe), 200);
+    assert.equal(await wiki.page.evaluate(url => new Promise(resolve => {
+      const request = new XMLHttpRequest(); request.open('POST', url); request.onload = () => resolve(request.status); request.send('file');
+    }), probe), 200);
+    assert.deepEqual(wiki.state.savedHeaders, ['lease-fixture', 'lease-fixture']);
+    wiki.state.leaseGeneration = 'new-owner-generation';
+    assert.equal(await wiki.page.evaluate(async url => (await fetch(url, { method: 'POST', body: 'old file' })).status, probe), 403);
+    assert.equal(wiki.state.savedHeaders[2], 'lease-fixture');
+  } finally { await wiki.context.close(); }
+});
+
+test('an administrator can explicitly force release a busy draft without creating a second draft', async () => {
+  const wiki = await wikiFixture({ status: 'draft', linkedTarget: 'Knowledge.Article', leaseStatus: 'busy', admin: true });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/view/Drafts/NewArticle/WebHome');
+    await wiki.page.locator('#luxpedia-force-release').click();
+    await wiki.page.locator('#luxpedia-claim-edit').waitFor();
+    assert.equal(wiki.state.leaseStatus, 'free');
+    assert.equal(wiki.state.leaseActions[0].operation, 'force-release');
+    assert.equal(wiki.state.actions.length, 0);
+    assert.equal(wiki.state.confirmations, 1);
   } finally { await wiki.context.close(); }
 });

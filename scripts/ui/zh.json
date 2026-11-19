@@ -223,5 +223,19 @@
   "favoritesPageUnavailable": "请先打开有查看权限且已保存的文章，再进行收藏。",
   "favoritesLoading": "正在加载收藏状态，请稍候…",
   "favoritesMenuAdd": "加入收藏",
-  "favoritesMenuRemove": "取消收藏"
+  "favoritesMenuRemove": "取消收藏",
+  "leaseOwned": "你正在编辑此草稿。编辑权将于 {time} 到期，保存不会延长时间。",
+  "leaseBusy": "{owner} 正在编辑此草稿，编辑权截止 {time}。你可以查看已保存的内容。",
+  "leaseLost": "你的编辑权已结束。离开前请保留或复制未保存的正文，此页面不能再保存覆盖他人的修改。",
+  "leaseFree": "此草稿的已保存内容仍保留。接手后可获得最长 24 小时的编辑权。",
+  "leaseLocked": "此草稿正在审核、已发布或已放弃，需先完成相应流程才能编辑。",
+  "leaseClaim": "接手编辑",
+  "leaseRelease": "释放编辑权",
+  "leaseSaveRelease": "保存并释放编辑权",
+  "leaseForce": "强制释放编辑权",
+  "leaseForceConfirm": "确认释放当前编辑者的编辑权？已保存的内容会保留，对方未保存的修改将无法继续保存。",
+  "leaseUnavailable": "暂时无法获取编辑权，请刷新或联系管理员检查工作流组件。",
+  "leaseKeepText": "请先复制未保存的正文，再刷新草稿并点击接手编辑。",
+  "leaseListBusy": "{owner} · 编辑权截止 {time}",
+  "leaseListFree": "可接手编辑"
 }
