@@ -446,10 +446,13 @@ WORKFLOW_UX_JS = r"""(function () {
     workflowObjectExists(reference).then(function (hasWorkflow) {
       var container = document.createElement('div');
       container.id = 'luxpedia-category-choice';
-      container.style.cssText = 'margin:8px 0;padding:8px 10px;background:#f5f7fa;border:1px solid #d9dee7;border-radius:4px;';
+      container.className = 'xform';
       if (hasWorkflow) {
         workflowTarget(reference).then(function (target) {
-          container.textContent = target ? t('linkedTarget') + ' ' + target : t('linkedFallback');
+          var information = document.createElement('p');
+          information.className = 'xHint';
+          information.textContent = target ? t('linkedTarget') + ' ' + target : t('linkedFallback');
+          container.appendChild(information);
           var editor = document.querySelector('#xwikieditor');
           if (editor && editor.parentNode) { editor.parentNode.insertBefore(container, editor); }
         });
@@ -461,8 +464,6 @@ WORKFLOW_UX_JS = r"""(function () {
         var info = publicationLocation(reference);
         var select = document.createElement('select');
         select.id = 'luxpedia-publish-category';
-        select.className = 'form-control';
-        select.style.cssText = 'display:inline-block;width:auto;min-width:14em;margin:0 8px;';
         var rootOption = document.createElement('option');
         rootOption.value = '__root__';
         rootOption.textContent = t('root');
@@ -486,13 +487,18 @@ WORKFLOW_UX_JS = r"""(function () {
         label.htmlFor = select.id;
         label.textContent = t('chooseCategory');
         label.dataset.luxpediaI18n = 'chooseCategory';
-        var hint = document.createElement('span');
-        hint.style.cssText = 'color:#666;margin-left:6px;';
+        var hint = document.createElement('div');
+        hint.id = 'luxpedia-category-hint';
+        hint.className = 'xHint';
+        select.setAttribute('aria-describedby', hint.id);
         hint.textContent = t('categoryHint');
         hint.dataset.luxpediaI18n = 'categoryHint';
-        container.appendChild(label);
-        container.appendChild(select);
-        container.appendChild(hint);
+        // Match core XWiki fields (xform / dl / dt / dd / xHint); the site theme owns their appearance.
+        var fields = document.createElement('dl');
+        var term = document.createElement('dt'); term.appendChild(label);
+        var value = document.createElement('dd');
+        value.appendChild(hint); value.appendChild(select);
+        fields.appendChild(term); fields.appendChild(value); container.appendChild(fields);
         var editor = document.querySelector('#xwikieditor');
         if (editor && editor.parentNode) { editor.parentNode.insertBefore(container, editor); }
       });
