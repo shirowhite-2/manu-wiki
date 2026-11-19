@@ -6,6 +6,7 @@
     if (node && node.textContent !== value) { node.textContent = value; }
   }
   function translateWorkflowUI() {
+    reuseNativeCategoryField();
     bindDraftWorkspaceList();
     var workspaceAbandoned = workspaceSnapshot && workspaceSnapshot.abandoned && documentReference().startsWith('Drafts.');
     renderArticleMetadata();

@@ -121,7 +121,7 @@
     if (editable && sessionStorage.getItem(PREVIEW_PREFIX + reference) === '1' && !previewSaving && !previewSaved) {
       previewSaving = true;
       var selected = readChosenCategory(reference);
-      var persist = selected ? persistPrimaryCategory(reference, selected.label || '') : Promise.resolve(true);
+      var persist = saveChosenCategory(reference, selected);
       persist.then(function (saved) {
         previewSaving = false;
         previewSaved = true;

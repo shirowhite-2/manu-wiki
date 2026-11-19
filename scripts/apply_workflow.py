@@ -63,6 +63,7 @@ WORKFLOW_UX_JS = r"""(function () {
   var busy = false;
   var t = window.LuxPediaI18n.t;
   var uiRoles = null;
+  var categoryFields = new WeakMap();
 
   /* LUXPEDIA_WORKFLOW_PANEL */
   /* LUXPEDIA_DRAFT_ACTIONS */
@@ -166,9 +167,100 @@ WORKFLOW_UX_JS = r"""(function () {
   function categorySpace(label) {
     if (!label) { return Promise.resolve(''); }
     return categoryOptions().then(function (options) {
-      var selected = options.find(function (entry) { return entry.label === label; });
+      var selected = matchCategoryOption(label, '', options);
       return selected ? selected.key : '';
     });
+  }
+
+  function localCategoryValue(value) {
+    var local = value || '';
+    if (local.indexOf(':') >= 0) {
+      var wiki = window.XWiki && (XWiki.currentWiki || XWiki.Document && XWiki.Document.currentWiki) || 'xwiki';
+      if (!local.startsWith(wiki + ':')) { return null; }
+      local = local.slice(wiki.length + 1);
+    }
+    return local;
+  }
+
+  function matchCategoryOption(value, label, options) {
+    var exact = options.find(function (entry) { return entry.key === value || entry.label === value; });
+    if (exact) { return exact; }
+    var local = localCategoryValue(value);
+    if (local === null) { return null; }
+    return options.find(function (entry) {
+      return entry.key === local || entry.label === local || 'Knowledge.' + entry.key === local ||
+        'Knowledge.' + entry.key + '.WebHome' === local;
+    }) || (!/^(?:Knowledge\.|[A-Za-z]+:)/.test(value || '') && options.find(function (entry) { return entry.label === label; }));
+  }
+
+  function isRootCategory(value) {
+    return ['', '__root__', 'Knowledge', 'Knowledge.WebHome'].includes(localCategoryValue(value));
+  }
+
+  function nativeCategoryField() {
+    var selectors = ['select[name$="_primaryCategory"]', 'select[id$="_primaryCategory"]',
+      'select[name="primaryCategory"]', 'select[data-field="primaryCategory"]', 'select[name="category"]'];
+    for (var selector of selectors) {
+      var field = Array.from(document.querySelectorAll(selector)).find(function (node) {
+        return node.id !== 'luxpedia-publish-category' && !node.multiple;
+      });
+      if (field) { return field; }
+    }
+    for (var label of document.querySelectorAll('label[for]')) {
+      if (!/^(?:primary category|category|主分类|分类)$/i.test(label.textContent.trim().replace(/[\s:：*]+$/, ''))) { continue; }
+      var field = document.getElementById(label.htmlFor);
+      if (field && field.tagName === 'SELECT' && !field.multiple && field.id !== 'luxpedia-publish-category') { return field; }
+    }
+    return null;
+  }
+
+  function reuseNativeCategoryField(options) {
+    var native = nativeCategoryField();
+    if (!native || !native.options.length) { return false; }
+    if (categoryFields.has(native)) { return true; }
+    var fallback = document.getElementById('luxpedia-publish-category');
+    options = options || fallback && categoryFields.get(fallback);
+    if (!options) { return false; }
+    if (fallback && fallback.dataset.userChanged) {
+      var match = Array.from(native.options).find(function (option) {
+        var entry = matchCategoryOption(option.value, option.textContent.trim(), options);
+        return entry ? entry.key === fallback.value : fallback.value === '__root__' && isRootCategory(option.value);
+      });
+      if (!match) { return false; }
+      native.value = match.value;
+      native.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    categoryFields.set(native, options);
+    native.setAttribute('data-luxpedia-publication-category', 'true');
+    if (fallback) { document.getElementById('luxpedia-category-choice').remove(); }
+    return true;
+  }
+
+  function selectedCategory() {
+    var native = document.querySelector('select[data-luxpedia-publication-category]');
+    var field = native || document.getElementById('luxpedia-publish-category');
+    if (!field) { return null; }
+    var option = field.options[field.selectedIndex];
+    if (!native) { return { key: field.value, label: option && option.dataset.label || '' }; }
+    if (!option) { return { invalid: true }; }
+    var value = field.value;
+    var entry = matchCategoryOption(value, option && option.textContent.trim(), categoryFields.get(field) || []);
+    var root = isRootCategory(value);
+    if (!entry && !root) { return { invalid: true }; }
+    var result = { key: entry ? entry.key : '__root__', label: entry ? entry.label : '' };
+    // Let the native field keep its stored key/reference. Other native category fields only supply the destination.
+    if ([field.name, field.id].some(function (name) { return /(?:^|_)primaryCategory$/.test(name || ''); })) {
+      if (entry && !matchCategoryOption(value, '', categoryFields.get(field) || [])) { return { invalid: true }; }
+      result.propertyValue = value;
+    }
+    return result;
+  }
+
+  function saveChosenCategory(reference, chosen) {
+    if (!chosen) { return Promise.resolve(true); }
+    if (chosen.invalid) { return Promise.resolve(false); }
+    var value = chosen.propertyValue !== undefined ? chosen.propertyValue : chosen.label || '';
+    return persistPrimaryCategory(reference, value);
   }
 
   function defaultTarget(reference, selectedKey) {
@@ -180,6 +272,7 @@ WORKFLOW_UX_JS = r"""(function () {
       });
     }
     return primaryCategory(reference).then(function (category) {
+      if (category && isRootCategory(category)) { return { parent: 'Knowledge', name: info.name }; }
       return categorySpace(category).then(function (categoryKey) {
         var parentParts = ['Knowledge'];
         if (categoryKey) {
@@ -364,11 +457,11 @@ WORKFLOW_UX_JS = r"""(function () {
     workflowObjectExists(reference).then(function (exists) {
       if (!exists) {
         var chosen = readChosenCategory(reference);
-        var persist = chosen ? persistPrimaryCategory(reference, chosen.label || '') : Promise.resolve(true);
+        var persist = saveChosenCategory(reference, chosen);
         return persist.then(function (saved) {
           if (!saved) {
             sessionStorage.removeItem(key);
-            sessionStorage.removeItem(key + '.category');
+            if (!chosen || !chosen.invalid) { sessionStorage.removeItem(key + '.category'); }
             window.alert(t('categorySaveFailed'));
             return 'done';
           }
@@ -423,14 +516,8 @@ WORKFLOW_UX_JS = r"""(function () {
     done.addEventListener('click', function () {
       sessionStorage.removeItem(PREFIX + reference);
       sessionStorage.setItem(PREVIEW_PREFIX + reference, '1');
-      var category = document.querySelector('#luxpedia-publish-category');
-      if (category) {
-        var option = category.options[category.selectedIndex];
-        sessionStorage.setItem(PREFIX + reference + '.category', JSON.stringify({
-          key: category.value,
-          label: option && option.dataset.label || ''
-        }));
-      }
+      var category = selectedCategory();
+      if (category) { sessionStorage.setItem(PREFIX + reference + '.category', JSON.stringify(category)); }
     }, true);
     return true;
   }
@@ -442,7 +529,7 @@ WORKFLOW_UX_JS = r"""(function () {
 
   function installCategorySelector(reference, isAdmin, attempts) {
     if (isAdmin || reference === 'Drafts.WebHome' || attempts >= 30 || !location.pathname.match(/^\/bin\/edit\/Drafts(?:\/|$)/) ||
-        document.getElementById('luxpedia-category-choice')) { return; }
+        document.getElementById('luxpedia-category-choice') || document.querySelector('select[data-luxpedia-publication-category]')) { return; }
     workflowObjectExists(reference).then(function (hasWorkflow) {
       var container = document.createElement('div');
       container.id = 'luxpedia-category-choice';
@@ -460,10 +547,16 @@ WORKFLOW_UX_JS = r"""(function () {
       }
       Promise.all([categoryOptions(), primaryCategory(reference)]).then(function (values) {
         var options = Array.isArray(values[0]) ? values[0] : [];
+        if (reuseNativeCategoryField(options)) {
+          // Reuse the existing property control, including its native picker, ID, name, options and current selection.
+          return;
+        }
         var current = values[1];
         var info = publicationLocation(reference);
         var select = document.createElement('select');
         select.id = 'luxpedia-publish-category';
+        categoryFields.set(select, options);
+        select.addEventListener('change', function () { select.dataset.userChanged = 'true'; });
         var rootOption = document.createElement('option');
         rootOption.value = '__root__';
         rootOption.textContent = t('root');
@@ -477,9 +570,9 @@ WORKFLOW_UX_JS = r"""(function () {
           option.dataset.label = entry.label;
           select.appendChild(option);
         });
-        var selected = options.find(function (entry) { return entry.label === current; });
+        var selected = matchCategoryOption(current, '', options);
         if (selected) { select.value = selected.key; }
-        else if (info.categories.length) {
+        else if (!(current && isRootCategory(current)) && info.categories.length) {
           var nestedKey = info.categories.join('.');
           if (options.some(function (entry) { return entry.key === nestedKey; })) { select.value = nestedKey; }
         }

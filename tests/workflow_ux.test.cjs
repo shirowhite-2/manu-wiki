@@ -49,6 +49,18 @@ async function wikiFixture(options = {}) {
   }
   const linkedDraftReference = options.draftReference || 'Drafts.Linked.Article';
   const linkedDraftPath = options.draftPath || '/bin/view/' + linkedDraftReference.split('.').join('/');
+  const escapeAttribute = value => String(value).replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
+  function nativeCategoryMarkup() {
+    const config = options.nativeCategory;
+    if (!config) { return ''; }
+    const id = config.id || 'LuxPedia.Code.ArticleClass_0_primaryCategory';
+    const name = config.name || id;
+    return `<dl id="article-properties"><dt><label for="${escapeAttribute(id)}">Category</label></dt><dd>
+      <select id="${escapeAttribute(id)}" name="${escapeAttribute(name)}" class="native-property-widget"
+        onchange="window.nativeCategoryChanges=(window.nativeCategoryChanges||0)+1">
+        ${config.values.map(([value, label]) => `<option value="${escapeAttribute(value)}"${value === config.selected ? ' selected' : ''}>${escapeAttribute(label)}</option>`).join('')}
+      </select></dd></dl>`;
+  }
   function html(edit, requestedLanguage) {
     const nativeLanguage = requestedLanguage || options.serverLanguage || '';
     const start = form('start', `<input name="targetSpace" value="Drafts">
@@ -70,7 +82,7 @@ async function wikiFixture(options = {}) {
       <a id="tmUser" href="/bin/view/XWiki/${options.admin ? 'Admin' : 'editor'}">Profile</a>
       ${options.nativeEdit ? '<a id="tmEdit" href="' + editPath + '">Edit</a>' : ''}
       <div id="document-title"><h1>New article</h1></div>
-      ${edit ? `<div><textarea id="xwikieditor"></textarea></div>
+      ${edit ? `${options.lateNativeCategory ? '' : nativeCategoryMarkup()}<div><textarea id="xwikieditor"></textarea></div>
         <button class="realtime-action-done" onclick="location.href='${viewPath}'">Done</button>` : '<div class="panel"><h2 class="panel-title">Workflow</h2><div class="publicationworkflow-info">' + workflow + '</div></div>'}
       ${options.list ? '<div id="luxpedia-workspace-list"><button type="button">Abandon selected drafts</button></div>' +
         options.list.map(name => '<input type="checkbox" class="luxpedia-draft-select" data-reference="' + name + '" data-version="4.2">').join('') : ''}
@@ -221,8 +233,10 @@ async function wikiFixture(options = {}) {
   async function preview(category) {
     await page.goto(origin + editPath);
     if (!options.linkedTarget) {
-      await page.locator('#luxpedia-publish-category').waitFor();
-      if (category !== undefined) { await page.selectOption('#luxpedia-publish-category', category); }
+      const selector = options.nativeCategory && !options.lateNativeCategory ?
+        'select[data-luxpedia-publication-category]' : '#luxpedia-publish-category';
+      await page.locator(selector).waitFor();
+      if (category !== undefined) { await page.selectOption(selector, category); }
     } else {
       await page.locator('#luxpedia-category-choice').waitFor();
       assert.equal(await page.locator('#luxpedia-publish-category').count(), 0);
@@ -258,8 +272,110 @@ async function wikiFixture(options = {}) {
       assert.equal(start.workflow, 'LuxPedia.Workflow.Config');
     }
   }
-  return { context, page, state, preview, submit, expectPending, pendingKey, origin };
+  return { context, page, state, preview, submit, expectPending, pendingKey, origin, nativeCategoryMarkup };
 }
+
+for (const value of ['Operations', '操作手册', 'Knowledge.Operations.WebHome', 'xwiki:Knowledge.Operations.WebHome']) {
+  test('native article category is reused and preserves its stored value: ' + value, async () => {
+    const wiki = await wikiFixture({ nativeCategory: {
+      values: [['', 'Knowledge'], [value, '操作手册']], selected: value,
+    } });
+    try {
+      await wiki.submit();
+      await wiki.expectPending('Knowledge.Operations.NewArticle');
+      assert.equal(wiki.state.category, value);
+    } finally { await wiki.context.close(); }
+  });
+}
+
+test('native property node, selection, options and event bindings survive language changes', async () => {
+  const wiki = await wikiFixture({ nativeCategory: {
+    values: [['', 'Knowledge'], ['Operations', '操作手册'], ['Technical', '技术文档']], selected: 'Operations',
+  } });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
+    const native = wiki.page.locator('select[data-luxpedia-publication-category]');
+    await native.waitFor();
+    assert.equal(await wiki.page.locator('#luxpedia-category-choice').count(), 0);
+    await wiki.page.evaluate(() => { window.originalCategory = document.querySelector('select[data-luxpedia-publication-category]'); });
+    assert.equal(await native.inputValue(), 'Operations');
+    assert.equal(await native.getAttribute('name'), 'LuxPedia.Code.ArticleClass_0_primaryCategory');
+    assert.equal(await native.getAttribute('class'), 'native-property-widget');
+    await wiki.page.fill('#xwikieditor', 'Unsaved article');
+    await native.selectOption('Technical');
+    const url = wiki.page.url();
+    await wiki.page.selectOption('#luxpedia-language-select', 'zh');
+    assert.equal(wiki.page.url(), url);
+    assert.equal(await wiki.page.locator('#xwikieditor').inputValue(), 'Unsaved article');
+    assert.equal(await native.inputValue(), 'Technical');
+    assert.deepEqual(await native.locator('option').allTextContents(), ['Knowledge', '操作手册', '技术文档']);
+    assert.equal(await wiki.page.evaluate(() => window.originalCategory === document.querySelector('select[data-luxpedia-publication-category]')), true);
+    assert.equal(await wiki.page.evaluate(() => window.nativeCategoryChanges), 1);
+    await wiki.page.locator('.realtime-action-done').click();
+    await wiki.page.locator('#luxpedia-submit-review').click();
+    await wiki.expectPending('Knowledge.Technical.NewArticle');
+  } finally { await wiki.context.close(); }
+});
+
+test('generic native category field maps its option label to the workflow category', async () => {
+  const wiki = await wikiFixture({ nativeCategory: { name: 'category', id: 'native-category',
+    values: [['category-42', '操作手册']], selected: 'category-42',
+  } });
+  try {
+    await wiki.submit();
+    await wiki.expectPending('Knowledge.Operations.NewArticle');
+    assert.equal(wiki.state.category, '操作手册');
+  } finally { await wiki.context.close(); }
+});
+
+test('native root selection overrides a nested draft location', async () => {
+  const wiki = await wikiFixture({ reference: 'Drafts.Technical.NewArticle.WebHome', nativeCategory: {
+    values: [['Knowledge.WebHome', 'Knowledge'], ['Technical', '技术文档']], selected: 'Knowledge.WebHome',
+  } });
+  try {
+    await wiki.submit();
+    await wiki.expectPending('Knowledge.NewArticle');
+  } finally { await wiki.context.close(); }
+});
+
+for (const value of ['otherwiki:Knowledge.Operations.WebHome', 'unknown-category']) {
+  test('invalid native category blocks submission and repeated retries: ' + value, async () => {
+    const wiki = await wikiFixture({ nativeCategory: { values: [[value, 'Unknown']], selected: value } });
+    try {
+      await wiki.preview();
+      assert.equal(wiki.state.alerts.length, 1);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await wiki.page.locator('#luxpedia-submit-review').click();
+        await wiki.page.waitForFunction(() => document.querySelector('#luxpedia-submit-review') &&
+          !document.querySelector('#luxpedia-submit-review').disabled);
+        assert.equal(wiki.state.alerts.length, attempt + 2);
+        assert.equal(wiki.state.actions.length, 0);
+      }
+      assert.equal(wiki.state.status, '');
+      assert.deepEqual(wiki.state.errors, []);
+    } finally { await wiki.context.close(); }
+  });
+}
+
+test('late native property replaces fallback without losing a changed category or body', async () => {
+  const wiki = await wikiFixture({ lateNativeCategory: true, nativeCategory: {
+    values: [['Knowledge.WebHome', 'Knowledge'], ['Technical', '技术文档']], selected: 'Knowledge.WebHome',
+  } });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
+    await wiki.page.locator('#luxpedia-publish-category').selectOption('Technical');
+    await wiki.page.fill('#xwikieditor', 'Keep this draft');
+    await wiki.page.evaluate(markup => document.querySelector('#xwikieditor').insertAdjacentHTML('beforebegin', markup), wiki.nativeCategoryMarkup());
+    const native = wiki.page.locator('select[data-luxpedia-publication-category]');
+    await native.waitFor();
+    assert.equal(await native.inputValue(), 'Technical');
+    assert.equal(await wiki.page.locator('#luxpedia-publish-category').count(), 0);
+    assert.equal(await wiki.page.locator('#xwikieditor').inputValue(), 'Keep this draft');
+    await wiki.page.locator('.realtime-action-done').click();
+    await wiki.page.locator('#luxpedia-submit-review').click();
+    await wiki.expectPending('Knowledge.Technical.NewArticle');
+  } finally { await wiki.context.close(); }
+});
 
 for (const scenario of [
   { name: 'normal nested page uses its article name in the selected category',
@@ -277,6 +393,10 @@ for (const scenario of [
     reference: 'Drafts.Technical.NewArticle.WebHome', target: 'Knowledge.Technical.NewArticle' },
   { name: 'primary category supplies the default selection',
     primaryCategory: '技术文档', target: 'Knowledge.Technical.NewArticle' },
+  { name: 'reopened native category references supply the default selection',
+    primaryCategory: 'xwiki:Knowledge.Operations.WebHome', target: 'Knowledge.Operations.NewArticle' },
+  { name: 'reopened explicit native root selection overrides the draft folder',
+    reference: 'Drafts.Technical.NewArticle.WebHome', primaryCategory: 'Knowledge.WebHome', target: 'Knowledge.NewArticle' },
   { name: 'linked published article keeps the exact original target',
     linkedTarget: 'Knowledge.Operations.Existing.WebHome', target: 'Knowledge.Operations.Existing.WebHome' },
 ]) {
