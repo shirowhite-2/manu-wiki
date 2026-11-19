@@ -448,6 +448,38 @@ class InterfaceConfigTest(unittest.TestCase):
         self.assertEqual(preferences['default_language'], 'en')
         self.assertEqual(preferences['languages'], 'en,zh')
 
+    def test_template_center_is_admin_only_without_hiding_article_template_sources(self):
+        wiki = FakeWiki()
+        interface.apply(Module, wiki)
+        center = wiki.pages[('LuxPedia/Templates', 'WebHome')][1]
+        self.assertIn("hasAccess('admin'", center)
+        acl = wiki.object_data[('LuxPedia/Templates', 'WebHome', 'XWiki.XWikiRights')]
+        self.assertEqual(acl, {'groups': 'XWiki.LuxManagers,XWiki.XWikiAdminGroup', 'levels': 'view', 'allow': '1'})
+        self.assertNotIn(('LuxPedia/Templates', 'WebPreferences'), wiki.pages)
+        self.assertNotIn(('LuxPedia/Templates', 'Article', 'XWiki.XWikiRights'), wiki.object_data)
+        self.assertIn('LuxPedia.Templates.WebHome', wiki.pages[('XWiki', 'WebHome')][1])
+        self.assertTrue(any('文章模板' in body for method, path, body in wiki.requests
+                            if method == 'PUT' and '/spaces/Templates/pages/WebHome/translations/zh' in path))
+
+    def test_template_center_reuses_native_create_and_preserves_custom_sources_on_reapply(self):
+        wiki = FakeWiki()
+        wiki.article_template = 'Customized existing article template'
+        wiki.pages[('LuxPedia/Templates', 'TeamTemplate')] = ('Team template', 'Keep custom body')
+        for _ in range(2):
+            interface.apply(Module, wiki)
+        self.assertEqual(wiki.pages[('LuxPedia/Templates', 'TeamTemplate')], ('Team template', 'Keep custom body'))
+        self.assertEqual(wiki.article_template, 'Customized existing article template')
+        center = wiki.pages[('LuxPedia/Templates', 'WebHome')][1]
+        self.assertIn('spaceReference=LuxPedia.Templates', center)
+        self.assertIn('template=LuxPedia.Code.ArticleTemplateSeed', center)
+        self.assertIn('XWiki.TemplateProviderTemplate', center)
+        self.assertNotIn('.save(', center)
+        self.assertNotIn('.newObject(', center)
+        seed = wiki.pages[('LuxPedia/Code', 'ArticleTemplateSeed')][1]
+        self.assertNotIn('{{velocity', seed)
+        self.assertFalse(any(page == 'ArticleTemplateSeed' and cls == 'XWiki.TemplateProviderClass'
+                             for space, page, cls in wiki.object_data))
+
     def test_translation_and_system_pages_do_not_rewrite_articles(self):
         wiki = FakeWiki()
         interface.apply(Module, wiki)
@@ -457,6 +489,7 @@ class InterfaceConfigTest(unittest.TestCase):
             ('LuxPedia/Code', 'CategoryList'), ('LuxPedia/Code', 'ArticleList'),
             ('LuxPedia/Code', 'ArchiveList'), ('Knowledge/Archive', 'WebHome'),
             ('LuxPedia/Templates', 'Article'), ('LuxPedia/Templates', 'ArticleProvider'),
+            ('LuxPedia/Templates', 'WebHome'), ('LuxPedia/Code', 'ArticleTemplateSeed'),
             ('LuxPedia/Code', 'DraftList'), ('LuxPedia/Code', 'DraftTools'),
             ('LuxPedia', 'HelpPanel'), ('LuxPedia/Code', 'SourceEditUIX'), ('LuxPedia/Code', 'EditGuideUIX')}
         allowed |= {('XWiki', 'WebHome'), ('XWiki/Users', 'WebHome')}

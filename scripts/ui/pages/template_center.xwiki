@@ -1,0 +1,70 @@
+{{velocity}}
+#if($services.security.authorization.hasAccess('admin', $services.model.resolveDocument('XWiki.XWikiPreferences')))
+#set($providers = $services.query.xwql("from doc.object(XWiki.TemplateProviderClass) as provider where (doc.space = 'LuxPedia.Templates' or doc.space like 'LuxPedia.Templates.%') and doc.language = '' order by doc.title").execute())
+#set($registered = {})
+#foreach($reference in $providers)
+#set($provider = $xwiki.getDocument($reference))
+#if($provider.hasAccessLevel('view'))
+#set($source = '')
+#set($source = $provider.getObject('XWiki.TemplateProviderClass').getValue('template'))
+#if("$!source" != '')
+#set($sourcePage = $xwiki.getDocument($source))
+#if(!$registered.containsKey($sourcePage.fullName))#set($discard = $registered.put($sourcePage.fullName, []))#end
+#set($discard = $registered.get($sourcePage.fullName).add($provider))
+#end
+#end
+#end
+#set($templates = $services.query.xwql("where (doc.space = 'LuxPedia.Templates' or doc.space like 'LuxPedia.Templates.%') and doc.fullName <> 'LuxPedia.Templates.WebHome' and doc.name <> 'WebPreferences' and doc.language = '' order by doc.title").execute())
+#set($visible = false)
+
+{{html clean="false"}}
+<h1>$escapetool.xml($services.localization.render('luxpedia.templateCenter'))</h1>
+<p>$escapetool.xml($services.localization.render('luxpedia.templateCenterIntro'))</p>
+<p><a class="btn btn-primary" href="$escapetool.xml($xwiki.getURL('LuxPedia.Templates.WebHome', 'create', 'spaceReference=LuxPedia.Templates&parent=LuxPedia.Templates.WebHome&template=LuxPedia.Code.ArticleTemplateSeed&tocreate=terminal'))">$escapetool.xml($services.localization.render('luxpedia.createArticleTemplate'))</a>
+<a class="btn btn-default" href="$escapetool.xml($xwiki.getURL('XWiki.XWikiPreferences', 'admin', 'editor=globaladmin&section=Templates'))">$escapetool.xml($services.localization.render('luxpedia.systemTemplates'))</a></p>
+<ol>
+<li>$escapetool.xml($services.localization.render('luxpedia.templateCreateStep'))</li>
+<li>$escapetool.xml($services.localization.render('luxpedia.templateRegisterStep'))</li>
+<li>$escapetool.xml($services.localization.render('luxpedia.templateScopeStep'))</li>
+</ol>
+<table class="table table-striped luxpedia-system-list" style="width:100%;table-layout:fixed;overflow-wrap:anywhere">
+<thead><tr><th scope="col">$escapetool.xml($services.localization.render('luxpedia.articleTemplate'))</th><th scope="col">$escapetool.xml($services.localization.render('luxpedia.templateRegistration'))</th><th scope="col">$escapetool.xml($services.localization.render('luxpedia.templateActions'))</th></tr></thead>
+<tbody>
+#foreach($reference in $templates)
+#set($page = $xwiki.getDocument($reference))
+#if(!$page.isNew() && $page.hasAccessLevel('view') && !$page.getObject('XWiki.TemplateProviderClass'))
+#set($visible = true)
+<tr><td><a href="$escapetool.xml($page.getURL())">$escapetool.xml($page.displayTitle)</a></td><td>
+#if($registered.containsKey($page.fullName))
+$escapetool.xml($services.localization.render('luxpedia.templateRegistered'))
+#else
+$escapetool.xml($services.localization.render('luxpedia.templateUnregistered'))
+#end
+</td><td>
+<a href="$escapetool.xml($page.getURL('edit'))">$escapetool.xml($services.localization.render('luxpedia.editTemplateBody'))</a>
+#if($registered.containsKey($page.fullName))
+#foreach($provider in $registered.get($page.fullName))
+ · <a href="$escapetool.xml($provider.getURL('inline'))">$escapetool.xml($services.localization.render('luxpedia.templateSettings'))</a>
+#end
+#else
+## Match the native provider sheet's FooProvider -> Foo initialization.
+#set($providerReference = $services.model.createDocumentReference("${page.name}Provider", $page.documentReference.lastSpaceReference))
+#if(!$xwiki.getDocument($providerReference).isNew())
+ · $escapetool.xml($services.localization.render('luxpedia.templateProviderConflict'))
+#else
+#set($query = $escapetool.url({'spaceReference': $services.model.serialize($page.documentReference.lastSpaceReference, 'local'), 'name': "${page.name}Provider", 'template': 'XWiki.TemplateProviderTemplate', 'parent': 'XWiki.TemplateProviderClass', 'tocreate': 'terminal'}))
+ · <a href="$escapetool.xml($xwiki.getURL('LuxPedia.Templates.WebHome', 'create', $query))">$escapetool.xml($services.localization.render('luxpedia.registerArticleTemplate'))</a>
+#end
+#end
+</td></tr>
+#end
+#end
+#if(!$visible)
+<tr><td colspan="3">$escapetool.xml($services.localization.render('luxpedia.noArticleTemplates'))</td></tr>
+#end
+</tbody></table>
+{{/html}}
+#else
+$services.localization.render('luxpedia.adminOnly')
+#end
+{{/velocity}}

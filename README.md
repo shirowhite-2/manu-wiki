@@ -35,6 +35,7 @@ python3 tests/sprint1_smoke.py
 ## 交付与记录
 
 - [当前角色、百科/编写区流程与部署](docs/roles-and-interface.md)
+- [管理员文章模板中心与创建入口](docs/article-templates.md)
 - [默认翻译宏与中英文词条用法](docs/translation-macro.md)
 - [draw.io 分享链接与图表预览](docs/drawio.md)
 - [图片、视频与附件插入正文](docs/attachments-in-content.md)

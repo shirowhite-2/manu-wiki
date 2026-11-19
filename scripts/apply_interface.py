@@ -252,6 +252,8 @@ def apply(module, wiki):
         'template': 'LuxPedia.Templates.Article', 'action': 'edit', 'terminal': '0',
         'visibilityRestrictions': 'Drafts', 'creationRestrictions': 'Drafts',
         'creationRestrictionsAreSuggestions': '0'})
+    from apply_template_center import apply as apply_template_center
+    apply_template_center(module, wiki)
     # These menu extensions render on every page and use XWiki's selected locale.
     for page, old, key, name, order in [
             ('SourceEditUIX', '源码编辑', 'sourceEdit', 'luxpedia.source.edit', 15000),

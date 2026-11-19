@@ -4,6 +4,7 @@
 
 $services.localization.render('luxpedia.userDirectoryIntro')
 
+* [[$services.localization.render('luxpedia.templateCenter')>>LuxPedia.Templates.WebHome]]
 * [[$services.localization.render('luxpedia.users')>>XWiki.Users.WebHome]]
 * [[$services.localization.render('luxpedia.role.managers')>>XWiki.Users.Managers.WebHome]]
 * [[$services.localization.render('luxpedia.role.editors')>>XWiki.Users.Editors.WebHome]]
