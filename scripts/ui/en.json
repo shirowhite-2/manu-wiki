@@ -95,7 +95,7 @@
   "categoryCreated": "Category created.",
   "categoryExists": "This category key already exists.",
   "invalidToken": "Invalid form token. Reload the page and try again.",
-  "guideContent": "Editors can edit content and attachments across Knowledge and Drafts, including home and category pages. In Knowledge, choose Edit content to open the linked draft. Save draft and preview, check the rendered page, then Submit for review. The published page changes only after approval. The submitter can withdraw a pending request. Reviewers approve and publish or return it for changes; the submitter cannot review their own work. Published working copies stay hidden until editing resumes. Editors can update the writing-area home directly. Administrators manage category definitions, permissions, users and system configuration.\n\nFor draw.io diagrams, use File → Export as → URL or File → Publish → Link in draw.io. In the draft editor, paste the link in the draw.io link field and select Insert draw.io. Save and preview, then choose Preview diagram next to the link. Readers can also open the original link in a new tab. Private storage links may require sign-in and open through the original link instead of an inline preview.\n\nImages and files: upload or import them as attachments of the article. In the editor, use Insert attachment to select an image, video or file. Upload / manage attachments opens a separate tab; refresh the list after upload. Images display in the article. PDF links use the browser viewer when available. Word, Excel and other files open the attachment page and provide a direct download link. Save and preview before submitting for review.",
+  "guideContent": "Editors can edit content and attachments across Knowledge and Drafts, including home and category pages. In Knowledge, choose Edit content to open the linked draft. Save draft and preview, check the rendered page, then Submit for review. The published page changes only after approval. The submitter can withdraw a pending request. Reviewers approve and publish or return it for changes; the submitter cannot review their own work. Published working copies stay hidden until editing resumes. Editors can update the writing-area home directly. Administrators manage category definitions, permissions, users and system configuration.\n\nFor draw.io diagrams, use File → Export as → URL or File → Publish → Link in draw.io. In the draft editor, paste the link in External link — auto detect and select Insert link. Save and preview, then choose Preview diagram next to the link. Readers can also open the original link in a new tab. Private storage links may require sign-in and open through the original link instead of an inline preview.\n\nImages and files: upload or import them as attachments of the article. In the editor, use Insert attachment to select an image, video or file. Upload / manage attachments opens a separate tab; refresh the list after upload. Images display in the article. PDF links use the browser viewer when available. Word, Excel and other files open the attachment page and provide a direct download link. Save and preview before submitting for review.\n\nExternal links: GitHub, Bitbucket and other code/web links open their original websites. The same Insert link control accepts them. Existing imported link text and styling are preserved; standalone web URLs can become clickable links. Only supported draw.io share links have an optional diagram preview. Code-host links do not embed code or repository content.",
   "uploadLimit": "Attachment upload limit (MB)",
   "uploadUnit": " MB (converted to bytes when saved)",
   "uploadInvalid": "Enter an integer from 1 to 99999 MB.",
@@ -297,5 +297,14 @@
   "exportSheet": "Table",
   "exportLimit": "This export is too large. Reduce the filtered rows or split the table.",
   "exportCellLimit": "A cell exceeds the Excel text limit. Use CSV or shorten that cell.",
-  "exportFailed": "The table could not be exported. Please try again."
+  "exportFailed": "The table could not be exported. Please try again.",
+  "externalLink": "External link — auto detect",
+  "externalInsert": "Insert link",
+  "externalInvalid": "Enter an HTTP or HTTPS link without embedded credentials. Paste a link, not iframe or HTML code.",
+  "externalInserted": "Link inserted. Save and preview to open the source site.",
+  "externalDetectedDrawio": "draw.io diagram detected — a preview button will appear after saving.",
+  "externalDetectedDiagramLink": "draw.io link detected — the original link will be kept; this format has no inline preview.",
+  "externalDetectedGithub": "GitHub link detected — opens the original page.",
+  "externalDetectedBitbucket": "Bitbucket link detected — opens the original page.",
+  "externalDetectedLink": "Web link detected — opens the original page."
 }

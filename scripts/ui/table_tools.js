@@ -6,8 +6,10 @@
     var node = document.createElement(tag); node.dataset.luxpediaI18n = key; node.textContent = t(key); return node;
   }
   function cellText(cell) {
-    var value = cell.textContent.trim();
-    return value || Array.from(cell.querySelectorAll('img[alt]')).map(function (image) { return image.alt; }).join(' ');
+    var source = cell;
+    if (cell.querySelector('.luxpedia-drawio-preview')) { source = cell.cloneNode(true); source.querySelectorAll('.luxpedia-drawio-preview').forEach(function (node) { node.remove(); }); }
+    var value = source.textContent.trim();
+    return value || Array.from(source.querySelectorAll('img[alt]')).map(function (image) { return image.alt; }).join(' ');
   }
   function grid(table) {
     var source = Array.from(table.rows).filter(function (row) { return row.closest('table') === table && !row.hasAttribute('data-luxpedia-empty'); });
@@ -41,7 +43,7 @@
     var metadata = table.hasAttribute('data-luxpedia-browser');
     if (!metadata && (table.matches('.luxpedia-system-list, .xwiki-livetable, .livedata') ||
         table.closest('.xwiki-livetable, .livedata, [contenteditable="true"], pre') ||
-        table.querySelector('table, input, select, textarea, button') || table.rows.length < 2)) { return; }
+        Array.from(table.querySelectorAll('table, input, select, textarea, button')).some(function (node) { return !node.closest('.luxpedia-drawio-preview'); }) || table.rows.length < 2)) { return; }
     table.dataset.luxpediaTableBound = '1';
     var model;
     try { model = grid(table); } catch (error) { return; }

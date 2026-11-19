@@ -39,6 +39,7 @@ python3 tests/sprint1_smoke.py
 - [草稿独占编辑、24 小时释放与升级](docs/edit-locks.md)
 - [管理员文章模板中心与创建入口](docs/article-templates.md)
 - [默认翻译宏与中英文词条用法](docs/translation-macro.md)
+- [GitHub、Bitbucket 等外部链接与导入样式](docs/external-links.md)
 - [draw.io 分享链接与图表预览](docs/drawio.md)
 - [图片、视频与附件插入正文](docs/attachments-in-content.md)
 - [标题收藏按钮与我的收藏](docs/personal-favorites.md)

@@ -5,12 +5,17 @@ const { spawnSync } = require('node:child_process');
 const http = require('node:http');
 const path = require('node:path');
 const { chromium } = require('playwright');
+const fs = require('node:fs');
+const os = require('node:os');
 
 const extracted = spawnSync('python3', ['-c',
   'import sys; sys.path.insert(0, "scripts"); from apply_drawio import DRAWIO_JS; print(DRAWIO_JS)'],
 { cwd: path.join(__dirname, '..'), encoding: 'utf8' });
 assert.equal(extracted.status, 0, extracted.stderr);
 const script = extracted.stdout;
+const tables = spawnSync('python3', ['-c', 'import sys;sys.path.insert(0,"scripts");from apply_content_tools import CONTENT_TOOLS_JS;print(CONTENT_TOOLS_JS)'],
+  {cwd:path.join(__dirname,'..'),encoding:'utf8',maxBuffer:2000000});
+assert.equal(tables.status,0,tables.stderr);
 const diagram = 'https://app.diagrams.net/?lightbox=1&edit=_blank#RtestDiagram';
 const escape = text => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 let browser;
@@ -33,7 +38,7 @@ async function fixture(options = {}) {
       <style>body{margin:12px}#xwikicontent{max-width:900px}a{overflow-wrap:anywhere}</style>
       <p>Local browser fixture; external viewer is stubbed.</p>
       ${editing ? '<div id="editor-container"><div id="cke"><div id="editor-content" contenteditable="true"></div></div></div>' : ''}
-      <div id="xwikicontent">${editing ? '' : state.links.map((url, i) =>
+      <div id="xwikicontent">${editing ? '' : options.html !== undefined ? options.html : state.links.map((url, i) =>
         `<p>Before <a href="${escape(url)}">Diagram ${i}</a> after</p>`).join('')}
         <pre><a href="${escape(diagram)}">Example code link</a></pre></div>
       ${editing ? `<script>window.CKEDITOR = { instances: { content: {
@@ -41,7 +46,8 @@ async function fixture(options = {}) {
         container: { $: document.getElementById('cke') }, focus: function () {},
         insertHtml: function (html) { document.getElementById('editor-content').insertAdjacentHTML('beforeend', html); }
       } } };</script>` : ''}
-      <script>${script}</script>`);
+      ${options.tablesFirst ? '<script>' + tables.stdout + '</script>' : ''}<script>${script}</script>
+      ${options.withTables && !options.tablesFirst ? '<script>' + tables.stdout + '</script>' : ''}`);
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = 'http://127.0.0.1:' + server.address().port;
@@ -163,7 +169,7 @@ test('editor inserts a plain link that gains preview controls after saving, with
     await f.page.locator('#luxpedia-drawio-url').waitFor();
     await f.page.locator('#editor-content').fill('Existing article content');
     await f.page.locator('#luxpedia-drawio-url').fill(diagram);
-    await f.page.getByRole('button', { name: 'Insert draw.io', exact: true }).click();
+    await f.page.getByRole('button', { name: 'Insert link', exact: true }).click();
     assert.match(await f.page.locator('#editor-content').innerText(), /Existing article content/);
     assert.equal(await f.page.locator('#editor-content a').getAttribute('href'), diagram);
     assert.equal(await f.page.locator('iframe').count(), 0);
@@ -175,15 +181,15 @@ test('editor inserts a plain link that gains preview controls after saving, with
   } finally { await f.close(); }
 });
 
-test('editor rejects HTML and non-draw.io destinations without inserting markup', async () => {
+test('editor rejects HTML, credentials and unsafe protocols without inserting markup', async () => {
   const f = await fixture({ edit: true });
   try {
     for (const value of ['<iframe src="https://evil.test/"></iframe>', 'javascript:alert(1)',
-      'https://evil.test/#Rdata', 'https://app.diagrams.net.evil.test/#Rdata']) {
+      'data:text/html,evil', 'https://name:password@github.com/org/repo']) {
       await f.page.locator('#luxpedia-drawio-url').fill(value);
-      await f.page.getByRole('button', { name: 'Insert draw.io', exact: true }).click();
+      await f.page.getByRole('button', { name: 'Insert link', exact: true }).click();
       assert.equal(await f.page.locator('#editor-content a').count(), 0);
-      assert.match(await f.page.locator('#luxpedia-drawio-bar [role="status"]').innerText(), /HTTPS share link/);
+      assert.match(await f.page.locator('#luxpedia-drawio-bar [role="status"]').innerText(), /HTTP or HTTPS link/);
     }
     assert.equal(await f.page.locator('iframe').count(), 0);
     assert.equal(f.state.requests.length, 0);
@@ -208,7 +214,7 @@ test('changing editor language preserves the article and a partly entered diagra
     assert.equal(f.page.url(), before);
     assert.equal(await f.page.locator('#editor-content').innerText(), 'Unsaved article text');
     assert.equal(await f.page.locator('#luxpedia-drawio-url').inputValue(), 'not yet a valid link');
-    assert.equal(await f.page.getByRole('button', { name: '插入 draw.io', exact: true }).count(), 1);
+    assert.equal(await f.page.getByRole('button', { name: '插入链接', exact: true }).count(), 1);
     assert.equal(await f.page.locator('#luxpedia-drawio-url').evaluate(input => input.checkValidity()), true);
     await f.page.locator('#luxpedia-drawio-url').fill(diagram);
     await f.page.locator('#luxpedia-drawio-url').press('Enter');
@@ -216,3 +222,111 @@ test('changing editor language preserves the article and a partly entered diagra
     assert.equal(f.page.url(), before);
   } finally { await f.close(); }
 });
+
+test('GitHub, Bitbucket and other web links insert normally and never create an embed', async () => {
+  const f = await fixture({ edit: true });
+  try {
+    const values = [
+      ['https://github.com/org/repo/blob/main/example.js#L20', /GitHub link detected/],
+      ['https://bitbucket.org/team/repo/src/main/index.py', /Bitbucket link detected/],
+      ['https://example.com/reference', /Web link detected/],
+      ['https://github.com/org/repo/blob/main/design.drawio', /GitHub link detected/]
+    ];
+    for (const [url, expected] of values) {
+      await f.page.locator('#luxpedia-drawio-url').fill(url);
+      assert.match(await f.page.locator('#luxpedia-drawio-bar [role="status"]').innerText(), expected);
+      await f.page.getByRole('button', { name: 'Insert link', exact: true }).click();
+    }
+    const links = await f.page.locator('#editor-content a').evaluateAll(nodes => nodes.map(node => node.getAttribute('href')));
+    assert.deepEqual(links, values.map(value => value[0]));
+    f.state.links = links; await f.page.goto(f.location('view'));
+    assert.equal(await f.page.locator('.luxpedia-drawio-preview, iframe').count(), 0);
+    assert.deepEqual(await f.page.locator('#xwikicontent p a').evaluateAll(nodes => nodes.map(node=>node.getAttribute('href'))), links);
+    assert.equal(f.state.requests.length, 0);
+    await f.context.route('https://github.com/**', route => route.fulfill({ body: 'GitHub target fixture' }));
+    await Promise.all([f.page.waitForURL(values[0][0]), f.page.locator('#xwikicontent p a').first().click()]);
+    assert.equal(f.page.url(), values[0][0]);
+  } finally { await f.close(); }
+});
+
+test('imported HTML links preserve original labels, styles, destinations and normal navigation', async () => {
+  const f = await fixture({ html: `<p><a id="code-link" href="https://github.com/org/repo/blob/main/file.js#L2" class="imported-link" style="color:rgb(90, 30, 20);font-weight:bold" target="_self" rel="nofollow" title="Original title"><span>代码示例</span></a></p>
+    <p><a id="bb-link" href="https://bitbucket.org/org/repo/">Repository</a></p>
+    <p><a id="graph-link" href="${escape(diagram)}" class="imported-graph"><em>原始图表名称</em></a></p>` });
+  try {
+    const link = f.page.locator('#code-link');
+    assert.equal(await link.getAttribute('target'), '_self'); assert.equal(await link.getAttribute('rel'), 'nofollow');
+    assert.equal(await link.getAttribute('class'), 'imported-link'); assert.equal(await link.getAttribute('title'), 'Original title');
+    assert.match(await link.getAttribute('style'), /font-weight:bold/); assert.equal(await link.textContent(), '代码示例');
+    assert.equal(await f.page.locator('#graph-link').getAttribute('class'), 'imported-graph');
+    assert.equal(await f.page.locator('#graph-link em').textContent(), '原始图表名称');
+    assert.equal(await f.page.getByRole('button',{name:'Preview diagram',exact:true}).count(),1);
+    assert.equal(await f.page.locator('iframe').count(),0); assert.equal(f.state.requests.length,0);
+  } finally { await f.close(); }
+});
+
+test('standalone imported URLs become links while code and editable text stay unchanged', async () => {
+  const f = await fixture({ html: `<p id="plain-git">https://github.com/org/repo</p><p id="plain-graph">${escape(diagram)}</p>
+    <p><code id="code-example">${escape(diagram)}</code></p><div id="editable-example" contenteditable="true">${escape(diagram)}</div>` });
+  try {
+    assert.equal(await f.page.locator('#plain-git a').getAttribute('href'), 'https://github.com/org/repo');
+    assert.equal(await f.page.locator('#plain-graph a').getAttribute('href'), diagram);
+    assert.equal(await f.page.locator('#code-example a, #editable-example a').count(),0);
+    assert.equal(await f.page.getByRole('button',{name:'Preview diagram',exact:true}).count(),1);
+    assert.equal(f.state.requests.length,0);
+  } finally { await f.close(); }
+});
+
+test('asynchronous imports and changed links update once and remove orphan previews', async () => {
+  const f = await fixture({ links: [] });
+  try {
+    await f.page.evaluate(url => {
+      const p=document.createElement('p');p.id='dynamic-import';
+      const link=document.createElement('a');link.href=url;link.target='_self';link.rel='nofollow';link.textContent='Imported diagram';p.appendChild(link);
+      document.getElementById('xwikicontent').appendChild(p);
+    },diagram);
+    await f.page.getByRole('button',{name:'Preview diagram',exact:true}).waitFor();
+    await f.page.locator('#dynamic-import a').evaluate(node=>{node.href='https://github.com/org/repo'});
+    await f.page.waitForFunction(()=>document.querySelectorAll('.luxpedia-drawio-preview').length===0);
+    assert.equal(await f.page.locator('#dynamic-import a').getAttribute('target'),'_self');
+    assert.equal(await f.page.locator('#dynamic-import a').getAttribute('rel'),'nofollow');
+    await f.page.locator('#dynamic-import a').evaluate((node,url)=>{node.href=url},diagram);
+    await f.page.getByRole('button',{name:'Preview diagram',exact:true}).waitFor();
+    await f.page.locator('#dynamic-import a').evaluate(node=>node.removeAttribute('href'));
+    await f.page.waitForFunction(()=>document.querySelectorAll('.luxpedia-drawio-preview').length===0);
+    await f.page.locator('#dynamic-import a').evaluate((node,url)=>{node.href=url},diagram);
+    await f.page.getByRole('button',{name:'Preview diagram',exact:true}).waitFor();
+    await f.page.locator('#dynamic-import a').evaluate(node=>node.remove());
+    await f.page.waitForFunction(()=>document.querySelectorAll('.luxpedia-drawio-preview').length===0);
+    assert.equal(f.state.requests.length,0);
+  } finally { await f.close(); }
+});
+
+test('code-host drawio files and unrelated link formats still navigate without a preview', async () => {
+  const links = [
+    'https://github.com/org/repo/blob/main/design.drawio', 'https://raw.githubusercontent.com/org/repo/main/design.drawio',
+    'https://bitbucket.org/team/repo/src/main/design.drawio', 'https://example.com/file.drawio',
+    'https://app.diagrams.net.evil.test/#Rpayload'
+  ];
+  const f = await fixture({ links });
+  try {
+    assert.equal(await f.page.locator('.luxpedia-drawio-preview, iframe').count(),0);
+    assert.deepEqual(await f.page.locator('#xwikicontent p a').evaluateAll(nodes=>nodes.map(node=>node.getAttribute('href'))),links);
+    assert.equal(f.state.requests.length,0);
+  } finally { await f.close(); }
+});
+
+for (const tablesFirst of [true,false]) {
+  test('drawio controls coexist with table export without exporting interface text: tablesFirst='+tablesFirst, async()=>{
+    const f=await fixture({withTables:true,tablesFirst,html:`<table><thead><tr><th>Reference</th></tr></thead><tbody><tr><td><a href="${escape(diagram)}">Design diagram</a></td></tr></tbody></table>`});
+    const directory=fs.mkdtempSync(path.join(os.tmpdir(),'wiki-links-export-'));
+    try {
+      await f.page.locator('.luxpedia-table-tools').waitFor();
+      await f.page.getByRole('button',{name:'Preview diagram',exact:true}).click();
+      const waiting=f.page.waitForEvent('download');await f.page.getByRole('button',{name:'Export CSV',exact:true}).click();
+      const download=await waiting,target=path.join(directory,'references.csv');await download.saveAs(target);
+      assert.equal(fs.readFileSync(target,'utf8'),'\ufeff"Reference"\r\n"Design diagram"\r\n');
+      assert.equal(await f.page.locator('.luxpedia-drawio-preview').count(),1);
+    } finally {await f.close();fs.rmSync(directory,{recursive:true,force:true});}
+  });
+}
