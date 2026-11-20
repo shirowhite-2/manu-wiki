@@ -55,7 +55,9 @@ public class WorkflowPolicyListener implements EventListener
     @Override public void onEvent(Event event, Object source, Object data) {
         if (!(source instanceof XWikiDocument doc) || !(data instanceof XWikiContext context)) { return; }
         try {
-            if (EditLease.scope(doc) || doc.getDocumentReference().getSpaceReferences().get(0).getName().equals("Knowledge")) {
+            if (EditLease.scope(doc) || doc.getDocumentReference().getSpaceReferences().get(0).getName().equals("Knowledge") ||
+                DepartmentPolicy.groupReference(doc.getDocumentReference()) || doc.getDocumentReference().equals(
+                    new DocumentReference(context.getWikiId(), List.of("LuxPedia", "Code"), "DepartmentSettings"))) {
                 DraftWriteBoundary.guard(doc.getDocumentReference().toString());
                 XWikiDocument latest = context.getWiki().getDocument(doc.getDocumentReference(), context);
                 if (nativeRestore() && DraftWorkspace.admin(this, context) && latest.isNew()) {
@@ -86,6 +88,10 @@ public class WorkflowPolicyListener implements EventListener
         XWikiDocument base = doc.getTranslation() == 0 ? doc : context.getWiki().getDocument(ref, context);
         BaseObject previous = doc.getTranslation() == 0 ? old.getObject(WF) : base.getObject(WF);
         BaseObject next = base.getObject(WF);
+        if (DepartmentPolicy.groupReference(ref) || doc.getObject(DepartmentPolicy.CLASS) != null || old.getObject(DepartmentPolicy.CLASS) != null) {
+            require(DraftWorkspace.admin(this, context), "Only administrators may manage department roles.");
+        }
+        new DepartmentPolicy(this, context).requireDraftDestination(doc, user, DraftWorkspace.admin(this, context));
         String leaseOperation = workflowOperation();
         if (EditLease.scope(doc) && !deleting) {
             if (EditLease.SAVING.get() == doc) { return; } // exact server clone, never an HTTP flag
@@ -131,6 +137,7 @@ public class WorkflowPolicyListener implements EventListener
             return;
         }
         boolean protectedConfiguration = space.equals("LuxPedia") || space.equals("PublicationWorkflow") || space.equals("Favorites") ||
+            ref.equals(new DocumentReference(context.getWikiId(), "Main", "SolrSearchMacros")) ||
             (space.equals("XWiki") && Set.of("LuxEditors", "LuxReviewers", "LuxReaders", "LuxManagers",
                 "XWikiPreferences", "XWikiAdminGroup", "XWikiAllGroup").contains(ref.getName()));
         if (!protectedConfiguration && !space.equals("Drafts") && !space.equals("Knowledge") &&
@@ -451,7 +458,10 @@ public class WorkflowPolicyListener implements EventListener
     private String fieldLease(XWikiDocument doc) {
         return EditLease.field(doc, "owner") + ":" + EditLease.field(doc, "generation") + ":" + EditLease.field(doc, "expiresAt");
     }
-    public String getPolicyVersion() { return DraftWriteBoundary.present() ? "luxpedia-workflow-policy-12" : "POLICY_WRITE_BOUNDARY_MISSING"; }
+    public String getPolicyVersion() {
+        if (!DraftWriteBoundary.present()) { return "POLICY_WRITE_BOUNDARY_MISSING"; }
+        return DepartmentAuthorizationSettler.active ? "luxpedia-workflow-policy-13" : "POLICY_DEPARTMENTS_MISSING";
+    }
     /** Deployment migration: remove historical validator EDIT grants without re-authoring content. */
     public int repairExistingDraftRights(XWikiContext context) throws Exception {
         require(authorization.hasAccess(Right.ADMIN, context.getUserReference(),

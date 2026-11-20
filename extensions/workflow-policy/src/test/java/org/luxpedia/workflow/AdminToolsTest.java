@@ -295,4 +295,190 @@ class AdminToolsTest {
         assertNull(EditLease.SAVING.get());
     }
 
+    DepartmentPolicy departmentPolicy() { return new DepartmentPolicy(policy, context); }
+    void departmentSettings(boolean enabled, List<String> publicCategories) throws Exception {
+        store.put(departmentPolicy().settingsReference("xwiki"), document("LuxPedia.Code.DepartmentSettings", false,
+            new HashMap<>(Map.of(DepartmentPolicy.SETTINGS_CLASS, object(Map.of("payload", payload(Map.of("enabled", enabled, "publicCategories", publicCategories))))))));
+    }
+    XWikiDocument departmentGroup(String id, List<String> categories, List<String> members) throws Exception {
+        String name = "XWiki.LuxDepartment_" + id;
+        var group = document(name, false, new HashMap<>(Map.of(DepartmentPolicy.CLASS,
+            object(Map.of("payload", payload(Map.of("en", "Engineering", "zh", "工程部", "enabled", true, "categories", categories)))))));
+        var memberships = new ArrayList<BaseObject>();
+        for (String member : members) { memberships.add(object(Map.of("member", member))); }
+        when(group.getXObjects(ref(DepartmentPolicy.MEMBERS))).thenReturn(memberships);
+        store.put(ref(name), group); return group;
+    }
+    org.xwiki.security.authorization.SecurityAccessEntry departmentAccess(String name, List<DocumentReference> memberships, boolean wikiAdmin, Set<Right> nativeDenied) {
+        return departmentAccess(name, memberships, wikiAdmin, nativeDenied, false);
+    }
+    org.xwiki.security.authorization.SecurityAccessEntry departmentAccess(String name, List<DocumentReference> memberships, boolean wikiAdmin, Set<Right> nativeDenied, boolean asSpace) {
+        var settler = new DepartmentAuthorizationSettler(); settler.delegate = mock(org.xwiki.security.authorization.AuthorizationSettler.class);
+        settler.listener = () -> policy; settler.contexts = () -> context;
+        var nativeEntry = mock(org.xwiki.security.authorization.SecurityAccessEntry.class);
+        var resource = mock(org.xwiki.security.SecurityReference.class); when(resource.getSecurityType()).thenReturn(asSpace ? org.xwiki.model.EntityType.SPACE : org.xwiki.model.EntityType.DOCUMENT); when(resource.getOriginalDocumentReference()).thenReturn(asSpace ? null : ref(name)); when(resource.getOriginalSpaceReference()).thenReturn(asSpace ? ref(name).getLastSpaceReference() : null);
+        when(nativeEntry.getReference()).thenReturn(resource);
+        when(nativeEntry.getAccess()).thenReturn(right -> nativeDenied.contains(right) ? RuleState.DENY : RuleState.ALLOW);
+        var wikiEntry = mock(org.xwiki.security.authorization.SecurityAccessEntry.class);
+        when(wikiEntry.getAccess()).thenReturn(right -> right == Right.ADMIN && wikiAdmin ? RuleState.ALLOW : RuleState.DENY);
+        var targetRule = mock(org.xwiki.security.authorization.SecurityRuleEntry.class); when(targetRule.getReference()).thenReturn(resource);
+        var rootRule = mock(org.xwiki.security.authorization.SecurityRuleEntry.class); var wikiResource = mock(org.xwiki.security.SecurityReference.class);
+        when(wikiResource.getSecurityType()).thenReturn(org.xwiki.model.EntityType.WIKI); when(rootRule.getReference()).thenReturn(wikiResource);
+        var currentActor = context.getUserReference(); var actor = mock(org.xwiki.security.UserSecurityReference.class); when(actor.getOriginalReference()).thenReturn(currentActor);
+        var groups = memberships.stream().map(reference -> {
+            var group = mock(org.xwiki.security.GroupSecurityReference.class); when(group.getOriginalDocumentReference()).thenReturn(reference); return group;
+        }).toList();
+        when(settler.delegate.settle(eq(actor), eq(groups), any())).thenAnswer(call ->
+            ((Deque<?>) call.getArgument(2)).size() == 1 ? wikiEntry : nativeEntry);
+        return settler.settle(actor, groups, new ArrayDeque<>(List.of(targetRule, rootRule)));
+    }
+    @Test void departmentAccessIntersectsNativeSiteRightsInsteadOfGrantingEditing() throws Exception {
+        departmentSettings(true, List.of());
+        var group = departmentGroup("a".repeat(32), List.of("Knowledge.Engineering.WebHome"), List.of("XWiki.Admin"));
+        var access = departmentAccess("Knowledge.Engineering.Article.WebHome", List.of(group.getDocumentReference()), false, Set.of(Right.EDIT, Right.DELETE));
+        assertEquals(RuleState.ALLOW, access.getAccess().get(Right.VIEW));
+        assertEquals(RuleState.DENY, access.getAccess().get(Right.EDIT));
+        assertEquals(RuleState.DENY, access.getAccess().get(Right.DELETE));
+        var outside = departmentAccess("Knowledge.Finance.Article.WebHome", List.of(group.getDocumentReference()), false, Set.of());
+        for (Right right : List.of(Right.VIEW, Right.EDIT, Right.COMMENT, Right.DELETE)) { assertEquals(RuleState.DENY, outside.getAccess().get(right)); }
+    }
+    @Test void departmentsUnionDescendantScopesWhileUnassignedUsersOnlyReadPublicCategories() throws Exception {
+        departmentSettings(true, List.of("Knowledge.Public.WebHome"));
+        var engineering = departmentGroup("a".repeat(32), List.of("Knowledge.Engineering.WebHome"), List.of("XWiki.Admin"));
+        var finance = departmentGroup("b".repeat(32), List.of("Knowledge.Finance.WebHome"), List.of("XWiki.Admin"));
+        var groups = List.of(engineering.getDocumentReference(), finance.getDocumentReference());
+        for (String name : List.of("Knowledge.Engineering.Child.Article", "Knowledge.Finance.Article", "Knowledge.Public.Article")) {
+            assertEquals(RuleState.ALLOW, departmentAccess(name, groups, false, Set.of()).getAccess().get(Right.VIEW));
+        }
+        assertEquals(RuleState.ALLOW, departmentAccess("Knowledge.Public.Article", List.of(), false, Set.of()).getAccess().get(Right.VIEW));
+        assertEquals(RuleState.DENY, departmentAccess("Knowledge.Engineering.Article", List.of(), false, Set.of()).getAccess().get(Right.VIEW));
+        assertEquals(RuleState.ALLOW, departmentAccess("Knowledge.DocumentLibrary", List.of(), false, Set.of()).getAccess().get(Right.VIEW));
+    }
+    @Test void cachedDepartmentEntriesImmediatelyObserveScopeAndMembershipRevocation() throws Exception {
+        departmentSettings(true, List.of());
+        var group = departmentGroup("a".repeat(32), List.of("Knowledge.Engineering.WebHome"), List.of("XWiki.Admin"));
+        var access = departmentAccess("Knowledge.Engineering.Article", List.of(group.getDocumentReference()), false, Set.of());
+        assertEquals(RuleState.ALLOW, access.getAccess().get(Right.VIEW));
+        group.getObject(DepartmentPolicy.CLASS).setStringValue("payload", payload(Map.of("enabled", true, "categories", List.of("Knowledge.Finance.WebHome"))));
+        assertEquals(RuleState.DENY, access.getAccess().get(Right.VIEW));
+        group.getObject(DepartmentPolicy.CLASS).setStringValue("payload", payload(Map.of("enabled", true, "categories", List.of("Knowledge.Engineering.WebHome"))));
+        assertEquals(RuleState.ALLOW, access.getAccess().get(Right.VIEW));
+        group.getXObjects(ref(DepartmentPolicy.MEMBERS)).clear();
+        assertEquals(RuleState.DENY, access.getAccess().get(Right.VIEW));
+    }
+    @Test void administratorsKeepAccessGuestsDoNotAndDisabledOrBrokenPoliciesFailAsDefined() throws Exception {
+        departmentSettings(true, List.of("Knowledge.Public.WebHome"));
+        assertEquals(RuleState.ALLOW, departmentAccess("Knowledge.Private.Article", List.of(), true, Set.of()).getAccess().get(Right.VIEW));
+        when(context.getUserReference()).thenReturn(ref("XWiki.XWikiGuest"));
+        assertEquals(RuleState.DENY, departmentAccess("Knowledge.Public.Article", List.of(), false, Set.of()).getAccess().get(Right.VIEW));
+        when(context.getUserReference()).thenReturn(user);
+        var cached = departmentAccess("Knowledge.Private.Article", List.of(), false, Set.of());
+        departmentSettings(false, List.of()); assertEquals(RuleState.ALLOW, cached.getAccess().get(Right.VIEW));
+        store.get(departmentPolicy().settingsReference("xwiki")).getObject(DepartmentPolicy.SETTINGS_CLASS).setStringValue("payload", "invalid-json");
+        assertEquals(RuleState.DENY, cached.getAccess().get(Right.VIEW));
+    }
+    @Test void linkedDraftsUseTheKnowledgeTargetAndUnassignedDraftsStayWithTheirOwner() throws Exception {
+        departmentSettings(true, List.of());
+        var group = departmentGroup("a".repeat(32), List.of("Knowledge.Engineering.WebHome"), List.of("XWiki.Admin"));
+        var draft = document("Drafts.Work.WebHome", false, new HashMap<>(Map.of(WorkflowPolicyListener.WF, object(Map.of("target", "Knowledge.Engineering.Article.WebHome")))));
+        store.put(draft.getDocumentReference(), draft);
+        var cached = departmentAccess("Drafts.Work.WebHome", List.of(group.getDocumentReference()), false, Set.of());
+        assertEquals(RuleState.ALLOW, cached.getAccess().get(Right.VIEW));
+        draft.getObject(WorkflowPolicyListener.WF).setStringValue("target", "Knowledge.Finance.Article.WebHome");
+        assertEquals(RuleState.DENY, cached.getAccess().get(Right.VIEW));
+        draft.removeObjects(WorkflowPolicyListener.WF); when(draft.getCreatorReference()).thenReturn(user);
+        assertEquals(RuleState.ALLOW, cached.getAccess().get(Right.VIEW));
+        when(draft.getCreatorReference()).thenReturn(ref("XWiki.anotherEditor"));
+        assertEquals(RuleState.DENY, cached.getAccess().get(Right.VIEW));
+    }
+    @Test void editorsCannotSubmitIntoAnotherDepartmentOrForgeDepartmentGroupObjects() throws Exception {
+        departmentSettings(true, List.of());
+        var group = departmentGroup("a".repeat(32), List.of("Knowledge.Engineering.WebHome"), List.of("XWiki.Admin"));
+        policy.roleGroups = Set.of("xwiki:XWiki.LuxEditors", group.getDocumentReference().toString());
+        when(policy.authorization.hasAccess(eq(Right.ADMIN), any(), any())).thenReturn(false);
+        var draft = document("Drafts.Work.WebHome", false, new HashMap<>(Map.of(WorkflowPolicyListener.WF, object(Map.of("target", "Knowledge.Finance.Article.WebHome")))));
+        var error = assertThrows(SecurityException.class, () -> policy.check(draft, context, false));
+        assertTrue(error.getMessage().contains("department"));
+        assertThrows(SecurityException.class, () -> policy.check(group, context, false));
+        assertEquals("forbidden", service.adminWrite("save-department", "{}", "valid").get("status"));
+    }
+    @Test void nativeDepartmentGroupsSupportNestedTeamsWithoutCyclesGrantingAccess() throws Exception {
+        departmentSettings(true, List.of());
+        var group = departmentGroup("a".repeat(32), List.of("Knowledge.Engineering.WebHome"), List.of("XWiki.Team"));
+        var team = document("XWiki.Team", false, new HashMap<>(Map.of(DepartmentPolicy.MEMBERS, object(Map.of("member", "XWiki.Admin")))));
+        var teamMember = team.getObject(DepartmentPolicy.MEMBERS); when(team.getXObjects(ref(DepartmentPolicy.MEMBERS))).thenReturn(List.of(teamMember));
+        store.put(team.getDocumentReference(), team);
+        var access = departmentAccess("Knowledge.Engineering.Article", List.of(group.getDocumentReference()), false, Set.of());
+        assertEquals(RuleState.ALLOW, access.getAccess().get(Right.VIEW));
+        team.getObject(DepartmentPolicy.MEMBERS).setStringValue("member", policy.localSerializer.serialize(group.getDocumentReference()));
+        assertEquals(RuleState.DENY, access.getAccess().get(Right.VIEW));
+    }
+    @Test void departmentSettingsAreVersionedAndInvalidCategoriesAndMembersCannotMutateRoles() throws Exception {
+        departmentSettings(false, List.of());
+        var category = document("Knowledge.Engineering.WebHome", false, new HashMap<>(Map.of("LuxPedia.Code.CategoryClass", object(Map.of()))));
+        store.put(category.getDocumentReference(), category);
+        assertThrows(SecurityException.class, () -> departmentPolicy().saveSettings(Map.of("enabled", true, "publicCategories", List.of("Knowledge.WebHome"), "version", "2.1")));
+        assertThrows(SecurityException.class, () -> departmentPolicy().saveSettings(Map.of("enabled", true, "publicCategories", List.of(), "version", "1.1")));
+        var result = departmentPolicy().saveSettings(Map.of("enabled", true, "publicCategories", List.of("Knowledge.Engineering.WebHome"), "version", "2.1"));
+        assertEquals("ok", result.get("status")); assertTrue((Boolean) departmentPolicy().settings("xwiki").get("enabled"));
+        assertThrows(SecurityException.class, () -> departmentPolicy().saveDepartment(Map.of("id", "LuxManagers", "en", "Bad", "categories", List.of(), "members", List.of())));
+        assertThrows(SecurityException.class, () -> departmentPolicy().saveDepartment(Map.of("id", "", "en", "Bad", "categories", List.of(), "members", List.of("XWiki.XWikiGuest"))));
+    }
+    @Test void creatingAnEmptyDepartmentUsesANativeGroupWithoutChangingSiteRoleGroups() throws Exception {
+        var result = departmentPolicy().saveDepartment(Map.of("id", "", "en", "Research", "zh", "研发部", "categories", List.of(), "members", List.of()));
+        assertEquals("ok", result.get("status"));
+        var created = store.values().stream().filter(doc -> DepartmentPolicy.groupReference(doc.getDocumentReference())).findFirst().orElseThrow();
+        assertNotNull(created.getObject(DepartmentPolicy.CLASS)); assertNotNull(created.getObject(DepartmentPolicy.MEMBERS));
+        verify(wiki).saveDocument(eq(created), eq("Create department role"), eq(true), eq(context));
+        assertTrue(store.keySet().stream().noneMatch(ref -> Set.of("LuxEditors", "LuxManagers", "LuxReviewers").contains(ref.getName())));
+    }
+
+    @Test void nativeSpaceAuthorizationIsScopedAsWellAsDocumentAndAttachmentParents() throws Exception {
+        departmentSettings(true, List.of());
+        assertEquals(RuleState.DENY, departmentAccess("Knowledge.Private.WebHome", List.of(), false, Set.of(), true).getAccess().get(Right.VIEW));
+        departmentSettings(true, List.of("Knowledge.Private.WebHome"));
+        assertEquals(RuleState.ALLOW, departmentAccess("Knowledge.Private.WebHome", List.of(), false, Set.of(), true).getAccess().get(Right.VIEW));
+    }
+
+    @Test void updatingDepartmentMembershipAndScopeUsesOneVersionedNativeDocumentSave() throws Exception {
+        var group = departmentGroup("a".repeat(32), List.of("Knowledge.Old.WebHome"), List.of("XWiki.before"));
+        var updated = group.clone(); when(group.clone()).thenReturn(updated);
+        var savedMembers = new ArrayList<BaseObject>();
+        when(updated.getXObjects(ref(DepartmentPolicy.MEMBERS))).thenReturn(savedMembers);
+        when(updated.newXObject(eq(ref(DepartmentPolicy.MEMBERS)), eq(context))).thenAnswer(call -> {
+            var member = object(Map.of()); savedMembers.add(member); return member;
+        });
+        store.put(user, document("XWiki.Admin", false, new HashMap<>(Map.of("XWiki.XWikiUsers", object(Map.of())))));
+        var input = Map.of("id", "a".repeat(32), "version", "2.1", "en", "Engineering", "zh", "工程部", "enabled", false, "categories", List.of(), "members", List.of("XWiki.Admin"));
+        assertEquals("ok", departmentPolicy().saveDepartment(input).get("status"));
+        assertEquals(List.of("XWiki.Admin"), departmentPolicy().members(updated));
+        assertEquals(false, departmentPolicy().department(updated).get("enabled"));
+        assertEquals(List.of(), departmentPolicy().department(updated).get("categories"));
+        verify(wiki, times(1)).saveDocument(any(XWikiDocument.class), anyString(), anyBoolean(), eq(context));
+        assertThrows(SecurityException.class, () -> departmentPolicy().saveDepartment(input));
+        verify(wiki, times(1)).saveDocument(any(XWikiDocument.class), anyString(), anyBoolean(), eq(context));
+    }
+
+    @Test void nativeDepartmentGroupEditsAreFencedAgainstAConcurrentScopeUpdate() throws Exception {
+        var latest = departmentGroup("a".repeat(32), List.of(), List.of());
+        var update = latest.clone(); var stale = mock(XWikiDocument.class);
+        when(stale.getVersion()).thenReturn("1.1"); when(update.getOriginalDocument()).thenReturn(stale);
+        var event = new org.xwiki.bridge.event.DocumentUpdatingEvent();
+        policy.onEvent(event, update, context); assertTrue(event.isCanceled());
+    }
+
+    @Test void nativeSearchOnlyDisablesGlobalMetadataForRestrictedNonAdministrators() throws Exception {
+        departmentSettings(true, List.of());
+        assertFalse(service.departmentSearchRestricted());
+        when(policy.authorization.hasAccess(eq(Right.ADMIN), any(), any())).thenReturn(false);
+        assertTrue(service.departmentSearchRestricted());
+        departmentSettings(false, List.of()); assertFalse(service.departmentSearchRestricted());
+    }
+
+    @Test void ordinaryEditorsCannotRemoveTheNativeSearchPrivacyProtection() throws Exception {
+        when(policy.authorization.hasAccess(eq(Right.ADMIN), any(), any())).thenReturn(false);
+        var macros = document("Main.SolrSearchMacros", false, new HashMap<>());
+        assertThrows(SecurityException.class, () -> policy.check(macros, context, false));
+    }
+
 }

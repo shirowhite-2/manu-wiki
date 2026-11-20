@@ -1,12 +1,15 @@
 # 现有管理员界面：管理工具与导航配置
 
+> 当前分支增加[部门分类权限](department-roles.md)，策略 13 需要完整重建 JAR 和镜像。
+
+
 这次扩展现有 **Wiki 管理 → 内容**，新增“管理工具 / Administration tools”和“导航配置 / Navigation settings”两个原生管理分区。管理员首页 `XWiki.WebHome` 和现有管理员导航也提供入口。沿用 Flamingo/LuxPedia 主题与 English / 中文切换，不另建管理应用。
 
 只有拥有本 Wiki `admin` 权限的账号能读取管理数据或执行管理操作。角色计数使用当前 Wiki 用户组，用户、用户组和权限配置继续链接到原生管理器；没有建立第二套账号系统，后续可接若依。
 
 ## 现有 Mac 实例升级（8081）
 
-当前分支需要 **`luxpedia-workflow-policy-12`**；即使已经安装策略 10 / 11，也要重新构建 JAR 和镜像。先按原有流程备份数据库和 XWiki 数据卷，保留原项目目录、`.env`、`.secrets`、Compose 项目名和数据卷。在项目目录依次执行：
+当前分支需要 **`luxpedia-workflow-policy-13`**；即使已经安装策略 10 / 11，也要重新构建 JAR 和镜像。先按原有流程备份数据库和 XWiki 数据卷，保留原项目目录、`.env`、`.secrets`、Compose 项目名和数据卷。在项目目录依次执行：
 
 ```bash
 git switch feat/article-translation &&

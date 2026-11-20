@@ -1,0 +1,14 @@
+{{velocity}}
+#if($services.security.authorization.hasAccess('admin', $services.model.resolveDocument('XWiki.XWikiPreferences')))
+{{html clean="false"}}
+<section id="luxpedia-department-roles">
+<h2 data-luxpedia-i18n="departmentRoles"></h2>
+<p data-luxpedia-i18n="departmentIntro"></p>
+<p role="status" aria-live="polite"></p>
+<div data-department-content="1"></div>
+</section>
+{{/html}}
+#else
+$services.localization.render('luxpedia.adminOnly')
+#end
+{{/velocity}}

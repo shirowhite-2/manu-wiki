@@ -98,6 +98,14 @@ public class WorkflowPolicyScriptService implements ScriptService
         catch (Exception error) { return java.util.Map.of("status", "unavailable"); }
     }
 
+    /** Native Solr result rows are secured by XWiki; suppress global facets/highlights and counts in its UI. */
+    public boolean departmentSearchRestricted() {
+        XWikiContext context = context();
+        if (administrator(context)) { return false; }
+        try { return Boolean.TRUE.equals(new DepartmentPolicy((WorkflowPolicyListener) listener, context).settings(context.getWikiId()).get("enabled")); }
+        catch (Exception unavailable) { return true; }
+    }
+
     public java.util.Map<String, Object> adminRead(String operation, String search, String area, String page, String days) {
         XWikiContext context = context();
         if (!administrator(context)) { return java.util.Map.of("status", "forbidden"); }
@@ -106,6 +114,11 @@ public class WorkflowPolicyScriptService implements ScriptService
             java.util.Map<String, Object> result = switch (operation == null ? "" : operation) {
                 case "pages" -> admin.pages(search, area, page);
                 case "trash" -> admin.trash(page);
+                case "departments" -> new DepartmentPolicy(policy, context).read();
+                case "department-users" -> {
+                    var users = new java.util.LinkedHashMap<String, Object>(new IdentityDirectory(policy, context).users("all", search, page));
+                    users.put("status", "ok"); yield users;
+                }
                 case "settings" -> new NavigationSettings(policy, context).read();
                 case "categories" -> java.util.Map.of("status", "ok", "items", new NavigationSettings(policy, context).categories());
                 default -> admin.dashboard(days);
@@ -124,6 +137,12 @@ public class WorkflowPolicyScriptService implements ScriptService
                 case "preview-delete" -> admin.preview("delete", payload);
                 case "preview-restore" -> admin.preview("restore", payload);
                 case "execute" -> admin.execute(payload);
+                case "save-department", "save-department-settings" -> {
+                    WorkflowPolicyListener.require(payload != null && payload.length() <= 250000, "Department data is too large.");
+                    var input = AdminOperations.JSON.readValue(payload, java.util.Map.class);
+                    var departments = new DepartmentPolicy(policy, context);
+                    yield operation.equals("save-department") ? departments.saveDepartment(input) : departments.saveSettings(input);
+                }
                 case "save-settings" -> new NavigationSettings(policy, context).save(payload);
                 default -> java.util.Map.of("status", "invalid_operation");
             };
@@ -169,6 +188,14 @@ public class WorkflowPolicyScriptService implements ScriptService
         XWikiDocument adminSchema = context.getWiki().getDocument(new DocumentReference(context.getWikiId(), List.of("LuxPedia", "Code"), "AdminSettingsClass"), context).clone();
         if (adminSchema.getXClass().get("payload") == null && adminSchema.getXClass().addTextAreaField("payload", "Settings", 80, 20)) {
             context.getWiki().saveDocument(adminSchema, "Ensure administrator settings fields", true, context);
+        }
+        for (String className : List.of("DepartmentClass", "DepartmentSettingsClass")) {
+            var classRef = new DocumentReference(context.getWikiId(), List.of("LuxPedia", "Code"), className);
+            var classDoc = context.getWiki().getDocument(classRef, context).clone();
+            if (classDoc.getXClass().get("payload") == null) {
+                classDoc.getXClass().addTextAreaField("payload", "Server-managed department configuration", 80, 10);
+                context.getWiki().saveDocument(classDoc, "Initialize department role schema", true, context);
+            }
         }
         ((WorkflowPolicyListener) listener).repairExistingDraftRights(context);
         ((WorkflowPolicyListener) listener).registerExistingKnowledgeTargets(context);

@@ -11,7 +11,7 @@
     <dependency><groupId>org.mockito</groupId><artifactId>mockito-core</artifactId><version>5.15.2</version><scope>test</scope></dependency>
   </dependencies>
   <build>
-    <testResources><testResource><directory>../../scripts/ui/pages</directory><includes><include>template_center.xwiki</include></includes></testResource></testResources>
+    <testResources><testResource><directory>../../scripts/ui/pages</directory><includes><include>template_center.xwiki</include><include>department_search_navigation.vm</include></includes></testResource></testResources>
   <plugins>
     <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><version>3.14.0</version></plugin>
     <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-surefire-plugin</artifactId><version>3.5.2</version></plugin>
