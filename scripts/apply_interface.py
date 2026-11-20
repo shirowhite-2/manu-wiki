@@ -14,6 +14,7 @@ import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from interface_assets import MESSAGES, UI
+from apply_favorites import PAGE as FAVORITES_PAGE
 
 V = '''{{velocity}}
 #macro(lp $key)$services.localization.render("luxpedia.$key")#end
@@ -31,6 +32,7 @@ LEGACY_REVIEW_REDIRECT = """{{velocity}}
 #set($discard = $response.sendRedirect($xwiki.getURL('LuxPedia.Workflow.ReviewQueue')))
 {{/velocity}}"""
 PAGES = {
+    ("Favorites", "WebHome"): ("myFavorites", V + "= #lp('myFavorites') =\n\n" + FAVORITES_PAGE + END),
     ("LuxPedia/Workflow", "WebHome"): ("workflowCenter", V + "= #lp('workflowCenter') =\n\n[[#lp('queue')>>LuxPedia.Workflow.ReviewQueue]]\n" + END),
     ("LuxPedia/Workflow", "ReviewQueue"): ("queue", V + "= #lp('queue') =\n\n#lp('nextReview')\n\n" + REVIEW_LIST + END),
     ("Main", "WebHome"): ("home", V + '''= #lp('home') =
@@ -49,8 +51,10 @@ PAGES = {
     ("Knowledge", "CategoryGuide"): ("categoryGuide", ""),
     ("Knowledge", "DocumentLibrary"): ("library", ""),
     ("Drafts", "WebHome"): ("drafts", ""),
-    ("LuxPedia/Help", "EditGuide"): ("editGuide", V + "= #lp('editGuide') =\n\n#lp('guideContent')\n" + END),
-    ("LuxPedia/Help", "WebHome"): ("help", V + "= #lp('help') =\n\n#lp('guideContent')\n" + END),
+    ("LuxPedia/Help", "PageBrowser"): ("pageBrowser", V + "= #lp('pageBrowser') =\n\n#lp('pageBrowserIntro')\n\n{{include reference=\"LuxPedia.Code.PageBrowser\" author=\"target\"/}}\n" + END),
+    ("LuxPedia/Help", "ContentComponents"): ("contentComponents", V + "= #lp('contentComponents') =\n\n#lp('componentGuideText')\n" + END),
+    ("LuxPedia/Help", "EditGuide"): ("editGuide", V + "= #lp('editGuide') =\n\n#lp('guideContent')\n\n[[#lp('contentComponents')>>LuxPedia.Help.ContentComponents]] · [[#lp('pageBrowser')>>LuxPedia.Help.PageBrowser]]\n" + END),
+    ("LuxPedia/Help", "WebHome"): ("help", V + "= #lp('help') =\n\n#lp('guideContent')\n\n[[#lp('contentComponents')>>LuxPedia.Help.ContentComponents]] · [[#lp('pageBrowser')>>LuxPedia.Help.PageBrowser]]\n" + END),
     ("LuxPedia/About", "WebHome"): ("about", V + "= #lp('about') =\n\n#lp('aboutContent')\n" + END),
     ("LuxPedia", "WebHome"): ("helpCenter", V + "= #lp('helpCenter') =\n\n[[#lp('workflowCenter')>>LuxPedia.Workflow.WebHome]] · [[#lp('help')>>LuxPedia.Help.WebHome]] · [[#lp('about')>>LuxPedia.About.WebHome]]\n" + END),
 }
@@ -148,7 +152,7 @@ def apply(module, wiki):
         if changes:
             wiki.ensure_object_values('XWiki', 'XWikiPreferences', 'XWiki.XWikiPreferences', changes)
         break
-    for renderer, content in [('CategoryList', V + CATEGORY_LIST + END), ('ArticleList', V + ARTICLE_LIST + END),
+    for renderer, content in [('PageBrowser', V + (UI / 'pages/page_browser.xwiki').read_text() + END), ('CategoryList', V + CATEGORY_LIST + END), ('ArticleList', V + ARTICLE_LIST + END),
                               ('DraftList', V + (UI / 'pages/drafts.xwiki').read_text() + END), ('DraftTools', DRAFT_TOOLS),
                               ('ArchiveList', V + ARCHIVE_LIST + END)]:
         wiki.ensure_page('LuxPedia/Code', renderer, renderer, content, hidden=True, update=True)
@@ -250,6 +254,8 @@ def apply(module, wiki):
         'template': 'LuxPedia.Templates.Article', 'action': 'edit', 'terminal': '0',
         'visibilityRestrictions': 'Drafts', 'creationRestrictions': 'Drafts',
         'creationRestrictionsAreSuggestions': '0'})
+    from apply_template_center import apply as apply_template_center
+    apply_template_center(module, wiki)
     # These menu extensions render on every page and use XWiki's selected locale.
     for page, old, key, name, order in [
             ('SourceEditUIX', '源码编辑', 'sourceEdit', 'luxpedia.source.edit', 15000),

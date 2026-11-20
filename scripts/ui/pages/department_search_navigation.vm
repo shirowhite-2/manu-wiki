@@ -1,0 +1,18 @@
+## LUXPEDIA_DEPARTMENT_SEARCH
+#macro(luxpediaDepartmentSearchNavigation)
+#set($departmentSearchParams = {})
+#set($discard = $departmentSearchParams.putAll($request.parameterMap))
+<nav class="search-results-controls" aria-label="$escapetool.xml($services.localization.render('luxpedia.search'))">
+#if($start > 0)
+#set($previousIndex = $mathtool.sub($start, $rows))
+#if($previousIndex < 0)#set($previousIndex = 0)#end
+#set($discard = $departmentSearchParams.put('firstIndex', [$previousIndex]))
+<a class="btn btn-default" href="$escapetool.xml($doc.getURL('view', $escapetool.url($departmentSearchParams)))">$services.localization.render('luxpedia.tablePrevious')</a>
+#end
+#set($nextIndex = $mathtool.add($start, $rows))
+#if($searchResponse.results.numFound > $nextIndex)
+#set($discard = $departmentSearchParams.put('firstIndex', [$nextIndex]))
+<a class="btn btn-default" href="$escapetool.xml($doc.getURL('view', $escapetool.url($departmentSearchParams)))">$services.localization.render('luxpedia.tableNext')</a>
+#end
+</nav>
+#end

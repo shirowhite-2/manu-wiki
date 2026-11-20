@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
-"""Add a "insert video" bar above the CKEditor on XWiki edit pages.
+"""Install the unified image, video and file insertion bar for CKEditor.
 
-The bar lists the video attachments of the page being edited and inserts the
-same markup XWiki's own macro wizard produces for the Embed macro:
-    <!--startmacro:embed|-|attachment="NAME"--><!--stopmacro-->
-which becomes {{embed attachment="NAME" /}} when the page is saved.
-
-The script is delivered as an XWiki.JavaScriptExtension (use=always). It only
-acts on /bin/edit/... pages that contain a CKEditor instance.
-Reuses apply_sprint1.XWiki. Idempotent. Default is a dry run; pass --apply.
+Keeps the legacy VideoInsertScript extension identity for idempotent upgrades.
+Uses native relative image/link references and the native Embed command so publication can
+copy attachments without leaving readers dependent on Drafts download URLs.
+Reuses apply_sprint1.XWiki. Default is a dry run; pass --apply.
 """
 import argparse
 import importlib.util
@@ -22,135 +18,9 @@ from interface_assets import I18N_JS
 SPACE = "LuxPedia/Code"
 PAGE = "VideoInsertScript"
 
-VIDEO_INSERT_JS = I18N_JS + r"""(function () {
-  var t = window.LuxPediaI18n.t;
-  var BAR_ID = 'luxpedia-video-bar';
-  var VIDEO = /\.(mp4|mov|avi|webm|ogv|m4v)$/i;
+# Keep the installed extension identity so upgrades replace the old video-only bar.
+VIDEO_INSERT_JS = I18N_JS + (ROOT / 'scripts/ui/attachments.js').read_text()
 
-  function currentPage() {
-    var m = window.location.pathname.match(/\/bin\/edit\/(.+)$/);
-    if (!m) { return null; }
-    var parts = m[1].split('/').filter(function (p) { return p.length > 0; });
-    if (parts.length < 2) { return null; }
-    return { page: parts.pop(), spaces: parts };
-  }
-
-  function restPath(info) {
-    var segs = [];
-    info.spaces.forEach(function (s) { segs.push('spaces/' + encodeURIComponent(s)); });
-    return '/rest/wikis/xwiki/' + segs.join('/') + '/pages/' + encodeURIComponent(info.page) + '/attachments';
-  }
-
-  function build(editor, info) {
-    var bar = document.createElement('div');
-    bar.id = BAR_ID;
-    bar.setAttribute('style', 'margin:8px 0;padding:8px 10px;background:#f5f7fa;border:1px solid #d9dee7;border-radius:4px;font-size:14px;line-height:2;');
-
-    var label = document.createElement('strong');
-    label.textContent = t('insertVideo');
-    label.dataset.luxpediaI18n = 'insertVideo';
-
-    var select = document.createElement('select');
-    select.id = 'luxpedia-video-select';
-    select.setAttribute('style', 'min-width:16em;margin:0 6px;');
-    var placeholder = document.createElement('option');
-    placeholder.value = '';
-    placeholder.textContent = t('loadingVideos');
-    placeholder.dataset.luxpediaI18n = 'loadingVideos';
-    select.appendChild(placeholder);
-
-    var button = document.createElement('button');
-    button.type = 'button';
-    button.id = 'luxpedia-video-insert';
-    button.className = 'btn btn-primary';
-    button.textContent = t('insertIntoArticle');
-    button.dataset.luxpediaI18n = 'insertIntoArticle';
-    button.disabled = true;
-
-    var hint = document.createElement('span');
-    hint.setAttribute('style', 'color:#666;margin-left:8px;');
-    hint.textContent = t('videoHint');
-    hint.dataset.luxpediaI18n = 'videoHint';
-
-    bar.appendChild(label);
-    bar.appendChild(select);
-    bar.appendChild(button);
-    bar.appendChild(hint);
-    editor.container.$.parentNode.insertBefore(bar, editor.container.$);
-
-    fetch(restPath(info), { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
-      .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
-      .then(function (data) {
-        var names = (data.attachments || []).map(function (a) { return a.name; })
-          .filter(function (n) { return VIDEO.test(n); });
-        select.innerHTML = '';
-        if (names.length === 0) {
-          var none = document.createElement('option');
-          none.value = '';
-          none.textContent = t('noVideos');
-    none.dataset.luxpediaI18n = 'noVideos';
-          select.appendChild(none);
-          return;
-        }
-        names.forEach(function (n) {
-          var o = document.createElement('option');
-          o.value = n;
-          o.textContent = n;
-          select.appendChild(o);
-        });
-        button.disabled = false;
-      })
-      .catch(function () {
-        select.innerHTML = '';
-        var err = document.createElement('option');
-        err.value = '';
-        err.textContent = t('attachmentError');
-    err.dataset.luxpediaI18n = 'attachmentError';
-        select.appendChild(err);
-      });
-
-    button.addEventListener('click', function () {
-      var name = select.value;
-      if (!name) { return; }
-      var safe = name.replace(/["<>]/g, '');
-      editor.focus();
-      // Embed is a standalone macro. Insert it in a fresh empty paragraph (never inside text),
-      // followed by a visible caption with the file name.
-      var empty = new CKEDITOR.dom.element('p', editor.document);
-      empty.setHtml('<br>');
-      var selection = editor.getSelection();
-      var start = selection && selection.getStartElement();
-      var block = start && start.getAscendant ? start.getAscendant({ p: 1, h1: 1, h2: 1, h3: 1, h4: 1, h5: 1, h6: 1, li: 1, div: 1 }, true) : null;
-      if (block && block.getName && block.getName() !== 'body') {
-        empty.insertAfter(block);
-      } else {
-        editor.insertElement(empty);
-      }
-      var range = editor.createRange();
-      range.moveToElementEditStart(empty);
-      range.select();
-      editor.insertHtml('<p><!--startmacro:embed|-|attachment="' + safe + '"--><!--stopmacro--></p><p>（' + name + '）</p>');
-    });
-  }
-
-  var attempts = 0;
-  var timer = setInterval(function () {
-    attempts += 1;
-    if (attempts > 60) { clearInterval(timer); return; }
-    if (typeof CKEDITOR === 'undefined' || document.getElementById(BAR_ID)) { return; }
-    var names = Object.keys(CKEDITOR.instances);
-    var info = currentPage();
-    if (names.length === 0 || !info) { return; }
-    var editor = CKEDITOR.instances[names[0]];
-    clearInterval(timer);
-    if (editor.status === 'ready') {
-      build(editor, info);
-    } else {
-      editor.on('instanceReady', function () { build(editor, info); });
-    }
-  }, 500);
-})();
-"""
 
 VIDEO_PROPERTIES = {
     "name": "luxpedia.videoInsert",
@@ -169,8 +39,8 @@ def load_apply_module():
 
 
 def apply(module, wiki):
-    module.log("== video insert script")
-    wiki.ensure_page(SPACE, PAGE, "Video insert script", "Client-side video insert bar for the CKEditor.", hidden=True)
+    module.log("== image, video and file insertion script")
+    wiki.ensure_page(SPACE, PAGE, "Video insert script", "Insert images, videos and attachment links using native XWiki references.", hidden=True)
     wiki.ensure_object_values(SPACE, PAGE, "XWiki.JavaScriptExtension", VIDEO_PROPERTIES)
 
 

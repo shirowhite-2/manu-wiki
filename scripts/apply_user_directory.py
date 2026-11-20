@@ -7,6 +7,10 @@ ROLES = ('managers', 'editors', 'reviewers', 'readers', 'unassigned')
 ADMIN_NAVIGATION = """## LUXPEDIA_ADMIN_DIRECTORY_START
 #if($services.security.authorization.hasAccess('admin', $services.model.resolveDocument('XWiki.XWikiPreferences')))
 * [[$services.localization.render('luxpedia.xwikiAdmin')>>XWiki.WebHome]]
+** [[$services.localization.render('luxpedia.adminTools')>>XWiki.XWikiPreferences||queryString='section=LuxPediaOperations' action='admin']]
+** [[$services.localization.render('luxpedia.departmentRoles')>>XWiki.XWikiPreferences||queryString='editor=globaladmin&section=LuxPediaDepartments' action='admin']]
+** [[$services.localization.render('luxpedia.navigationSettings')>>XWiki.XWikiPreferences||queryString='section=LuxPediaNavigation' action='admin']]
+** [[$services.localization.render('luxpedia.templateCenter')>>LuxPedia.Templates.WebHome]]
 ** [[$services.localization.render('luxpedia.users')>>XWiki.Users.WebHome]]
 ** [[$services.localization.render('luxpedia.role.managers')>>XWiki.Users.Managers.WebHome]]
 ** [[$services.localization.render('luxpedia.role.editors')>>XWiki.Users.Editors.WebHome]]

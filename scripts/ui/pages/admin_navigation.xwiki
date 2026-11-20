@@ -1,0 +1,14 @@
+{{velocity}}
+#if($services.security.authorization.hasAccess('admin', $services.model.resolveDocument('XWiki.XWikiPreferences')))
+{{html clean="false"}}
+<section id="luxpedia-navigation-settings">
+<h2 data-luxpedia-i18n="navigationSettings"></h2>
+<p data-luxpedia-i18n="navigationSettingsIntro"></p>
+<p role="status" id="luxpedia-navigation-notice"></p>
+<div id="luxpedia-navigation-editor"></div>
+</section>
+{{/html}}
+#else
+$services.localization.render('luxpedia.adminOnly')
+#end
+{{/velocity}}

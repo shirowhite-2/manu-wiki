@@ -15,7 +15,7 @@
 | Publication Workflow | 2.4.9 | 发布POM/源码头LGPL2.1+；README写LGPLv3，差异见workflow.md | 安装与实测状态见报告 |
 | Chart.js Integration | 1.6.3 | 许可与依赖待对外分发前复核 | 已安装，图表示例渲染通过 |
 | Embed macro | 1.1.3 | LGPL 2.1+ | 已安装，MP4 正文内嵌通过 |
-| Favorites Application | 1.4.4 | LGPL 2.1 | 已安装，未做浏览器收藏流程验收 |
+| Favorites Application | 1.4.4 | LGPL 2.1 | 复用原生存储，新增标题星标和我的收藏；需策略 9，真实实例验收见 personal-favorites.md |
 | 模型服务 | 未提供端点/模型ID | 既有服务可能另有API费用和模型许可 | 未调用、未部署 |
 | ONLYOFFICE Docs Community | 候选，未锁定运行版本 | AGPLv3及附加条款；免费社区发行 | 未部署 |
 | Collabora CODE | 候选，调研26.04.2.4限制说明 | 主要MPL2.0及第三方许可；免费开发版 | 未部署 |

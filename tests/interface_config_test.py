@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 import apply_interface as interface
 import apply_workflow_security as security
 import apply_workflow as workflow
+import apply_favorites as favorites
 from interface_assets import MESSAGES
 
 
@@ -66,7 +67,7 @@ class FakeWiki:
     def request(self, method, path, data=None, content_type=None, **kwargs):
         self.requests.append((method, path, data))
         if 'PolicyStatus?' in path:
-            return 200, b'luxpedia-workflow-policy-8' if self.policy else b'POLICY_NOT_INSTALLED'
+            return 200, b'luxpedia-workflow-policy-13' if self.policy else b'POLICY_NOT_INSTALLED'
         if 'PolicySetup?' in path:
             return 200, b'AUDIT_CLASS_READY'
         if '/translations/' in path:
@@ -132,6 +133,35 @@ class DraftHomeRightsWiki:
 
 
 class InterfaceConfigTest(unittest.TestCase):
+    def test_personal_favorites_reuses_native_storage_and_installs_navigation_idempotently(self):
+        wiki = FakeWiki()
+        wiki.existing_pages.add(('Favorites/Code', 'FavoritesClass'))
+        wiki.pages[('XWiki', 'alice')] = ('Private profile', 'Preserved profile')
+        favorites.apply(Module, wiki)
+        favorites.apply(Module, wiki)
+        nav = wiki.object_data[('Panels', 'Navigation', 'Panels.PanelClass')]
+        self.assertEqual(nav['content'].count('LUXPEDIA_PERSONAL_FAVORITES_START'), 1)
+        self.assertIn('{{documentTree /}}', nav['content'])
+        self.assertEqual(nav['async_cached'], '0')
+        self.assertEqual(wiki.pages[('XWiki', 'alice')], ('Private profile', 'Preserved profile'))
+        self.assertEqual(wiki.pages[('LuxPedia/Workflow', 'Favorites')][1], wiki.pages[('Favorites/Code', 'AddRemoveFavoriteService')][1])
+        self.assertIn("$request.getMethod() == 'POST'", favorites.ENDPOINT)
+        self.assertIn("'form_token'", favorites.ENDPOINT)
+        self.assertIn('private, no-store', favorites.ENDPOINT)
+        self.assertIn("sendRedirect($xwiki.getURL('Favorites.WebHome'))", wiki.pages[('LuxPedia/Favorites', 'WebHome')][1])
+        exclusions = wiki.object_data[('PanelsCode', 'NavigationConfiguration', 'PanelsCode.NavigationConfigurationClass')]['exclusions']
+        self.assertEqual(exclusions.split('|').count('LuxPedia.Favorites.WebHome'), 1)
+        self.assertEqual(exclusions.split('|').count('Favorites.WebHome'), 1)
+
+    def test_favorites_list_has_one_canonical_page_outside_the_help_center(self):
+        wiki = FakeWiki()
+        interface.apply(Module, wiki)
+        self.assertIn('luxpedia-favorites-page', wiki.pages[('Favorites', 'WebHome')][1])
+        self.assertNotIn(('LuxPedia/Favorites', 'WebHome'), interface.PAGES)
+
+    def test_favorites_install_requires_the_native_schema_without_replacing_it(self):
+        with self.assertRaisesRegex(RuntimeError, 'Favorites Application'):
+            favorites.apply(Module, FakeWiki())
     def test_editable_home_content_has_no_inline_script_and_preserves_approved_changes(self):
         wiki = FakeWiki()
         custom = {('Knowledge', 'WebHome'): ('Team encyclopedia', '= Approved introduction =\nTeam content'),
@@ -418,15 +448,57 @@ class InterfaceConfigTest(unittest.TestCase):
         self.assertEqual(preferences['default_language'], 'en')
         self.assertEqual(preferences['languages'], 'en,zh')
 
+    def test_template_center_is_admin_only_without_hiding_article_template_sources(self):
+        wiki = FakeWiki()
+        interface.apply(Module, wiki)
+        center = wiki.pages[('LuxPedia/Templates', 'WebHome')][1]
+        self.assertIn("hasAccess('admin'", center)
+        acl = wiki.object_data[('LuxPedia/Templates', 'WebHome', 'XWiki.XWikiRights')]
+        self.assertEqual(acl, {'groups': 'XWiki.LuxManagers,XWiki.XWikiAdminGroup', 'levels': 'view', 'allow': '1'})
+        registration = wiki.object_data[('LuxPedia/Templates', 'WebHome', 'XWiki.ConfigurableClass')]
+        self.assertEqual(registration['displayInCategory'], 'content')
+        self.assertEqual(registration['displayInSection'], 'LuxPediaTemplates')
+        self.assertEqual(registration['scope'], 'WIKI')
+        self.assertEqual(registration['configurationClass'], '')
+        self.assertEqual(registration['codeToExecute'],
+                         '{{include reference="LuxPedia.Templates.WebHome" context="new"/}}')
+        translations = wiki.pages[('LuxPedia/Code', 'InterfaceTranslations')][1]
+        self.assertIn('admin.luxpediatemplates=Article templates', translations)
+        self.assertNotIn(('LuxPedia/Templates', 'WebPreferences'), wiki.pages)
+        self.assertNotIn(('LuxPedia/Templates', 'Article', 'XWiki.XWikiRights'), wiki.object_data)
+        self.assertIn('LuxPedia.Templates.WebHome', wiki.pages[('XWiki', 'WebHome')][1])
+        self.assertTrue(any('文章模板' in body for method, path, body in wiki.requests
+                            if method == 'PUT' and '/spaces/Templates/pages/WebHome/translations/zh' in path))
+
+    def test_template_center_reuses_native_create_and_preserves_custom_sources_on_reapply(self):
+        wiki = FakeWiki()
+        wiki.article_template = 'Customized existing article template'
+        wiki.pages[('LuxPedia/Templates', 'TeamTemplate')] = ('Team template', 'Keep custom body')
+        for _ in range(2):
+            interface.apply(Module, wiki)
+        self.assertEqual(wiki.pages[('LuxPedia/Templates', 'TeamTemplate')], ('Team template', 'Keep custom body'))
+        self.assertEqual(wiki.article_template, 'Customized existing article template')
+        center = wiki.pages[('LuxPedia/Templates', 'WebHome')][1]
+        self.assertIn('spaceReference=LuxPedia.Templates', center)
+        self.assertIn('template=LuxPedia.Code.ArticleTemplateSeed', center)
+        self.assertIn('XWiki.TemplateProviderTemplate', center)
+        self.assertNotIn('.save(', center)
+        self.assertNotIn('.newObject(', center)
+        seed = wiki.pages[('LuxPedia/Code', 'ArticleTemplateSeed')][1]
+        self.assertNotIn('{{velocity', seed)
+        self.assertFalse(any(page == 'ArticleTemplateSeed' and cls == 'XWiki.TemplateProviderClass'
+                             for space, page, cls in wiki.object_data))
+
     def test_translation_and_system_pages_do_not_rewrite_articles(self):
         wiki = FakeWiki()
         interface.apply(Module, wiki)
         allowed = set(interface.PAGES) | {('PublicationWorkflow', 'Translations'), ('PublicationWorkflow', 'WebHome'),
             ('PublicationWorkflow', 'Overview'), ('Knowledge', 'CategoryAdmin'),
             ('LuxPedia/Code', 'CategoryHomeTemplate'), ('LuxPedia/Code', 'InterfaceTranslations'),
-            ('LuxPedia/Code', 'CategoryList'), ('LuxPedia/Code', 'ArticleList'),
+            ('LuxPedia/Code', 'CategoryList'), ('LuxPedia/Code', 'ArticleList'), ('LuxPedia/Code', 'PageBrowser'),
             ('LuxPedia/Code', 'ArchiveList'), ('Knowledge/Archive', 'WebHome'),
             ('LuxPedia/Templates', 'Article'), ('LuxPedia/Templates', 'ArticleProvider'),
+            ('LuxPedia/Templates', 'WebHome'), ('LuxPedia/Code', 'ArticleTemplateSeed'),
             ('LuxPedia/Code', 'DraftList'), ('LuxPedia/Code', 'DraftTools'),
             ('LuxPedia', 'HelpPanel'), ('LuxPedia/Code', 'SourceEditUIX'), ('LuxPedia/Code', 'EditGuideUIX')}
         allowed |= {('XWiki', 'WebHome'), ('XWiki/Users', 'WebHome')}
@@ -571,6 +643,77 @@ class InterfaceConfigTest(unittest.TestCase):
         wiki.request = lambda *args, **kwargs: (403, b'forbidden')
         with self.assertRaisesRegex(RuntimeError, 'translation zh: 403'):
             interface.ensure_translation(wiki, 'Main', 'WebHome', 'zh', '首页', '正文')
+
+    def test_content_tools_install_only_protected_scripts_and_browser_help_pages(self):
+        import apply_content_tools as content_tools
+        wiki = FakeWiki()
+        content_tools.apply(Module, wiki)
+        self.assertEqual(set(wiki.pages), {('LuxPedia/Code', 'ContentTools')})
+        props = wiki.object_data[('LuxPedia/Code', 'ContentTools', 'XWiki.JavaScriptExtension')]
+        self.assertIn('LuxPediaTableExport', props['code'])
+        self.assertIn('Content components', props['code'])
+        self.assertNotIn('eval(', props['code'])
+        self.assertEqual(props['parse'], '0')
+        self.assertIn(('LuxPedia/Help', 'PageBrowser'), interface.PAGES)
+        self.assertIn(('LuxPedia/Help', 'ContentComponents'), interface.PAGES)
+        source = (ROOT / 'scripts/ui/pages/page_browser.xwiki').read_text()
+        self.assertIn("hasAccessLevel('view')", source)
+        self.assertLess(source.index("hasAccessLevel('view')"), source.index('data-area='))
+
+    def test_policy_11_is_rejected_before_attempting_draft_migration(self):
+        with self.assertRaisesRegex(RuntimeError, 'rebuild the JAR and Docker image'):
+            security.verify_response(200, b'luxpedia-workflow-policy-11', 'luxpedia-workflow-policy-13', 'PolicyStatus')
+
+    def test_department_manager_is_native_admin_only_and_health_requires_authorization_extension(self):
+        import apply_department_roles as departments
+        wiki = FakeWiki()
+        departments.apply(Module, wiki)
+        section = wiki.object_data[('LuxPedia/Code', 'DepartmentRoles', 'XWiki.ConfigurableClass')]
+        self.assertEqual(section['displayInSection'], 'LuxPediaDepartments')
+        self.assertEqual(section['displayInCategory'], 'content')
+        for page in ['DepartmentRoles', 'DepartmentSettings']:
+            rule = wiki.object_data[('LuxPedia/Code', page, 'XWiki.XWikiRights')]
+            self.assertEqual(rule['groups'], 'XWiki.LuxManagers,XWiki.XWikiAdminGroup')
+            self.assertEqual(rule['levels'], 'view')
+        self.assertIn("hasAccess('admin'", wiki.pages[('LuxPedia/Code', 'DepartmentRoles')][1])
+        with self.assertRaisesRegex(RuntimeError, 'security.authorization.settler'):
+            security.verify_response(200, b'POLICY_DEPARTMENTS_MISSING', 'luxpedia-workflow-policy-13', 'PolicyStatus')
+
+    def test_native_search_protection_is_idempotent_and_never_skips_row_authorization(self):
+        import apply_department_roles as departments
+        source = "{{velocity}}\n#macro (displaySearchResults)\n#pagination($paginationParameters)\n#pagination($paginationParameters)\n#end\n#set ($searchResponse = $query.execute()[0])\n{{/velocity}}"
+        updated = departments.protect_solr_macros(source)
+        self.assertIn("$query.bindValue('facet', false)", updated)
+        self.assertIn("$query.bindValue('hl', false)", updated)
+        self.assertIn("$query.bindValue('debugQuery', 'off')", updated)
+        self.assertIn('$query.execute()[0]', updated)
+        self.assertLess(updated.index('## LUXPEDIA_DEPARTMENT_SEARCH'), updated.index('#macro (displaySearchResults)'))
+        self.assertLess(updated.index('## LUXPEDIA_DEPARTMENT_SEARCH'), updated.index('{{/velocity}}'))
+        self.assertIn('departmentSearchRestricted()', updated)
+        self.assertEqual(departments.protect_solr_macros(updated), updated)
+        with self.assertRaisesRegex(RuntimeError, 'supported layout'):
+            departments.protect_solr_macros('custom unknown search layout')
+
+    def test_administration_reuses_native_sections_and_protects_raw_settings(self):
+        import apply_admin_tools as admin
+        wiki = FakeWiki()
+        admin.apply(Module, wiki)
+        for page, section in [('AdminOperations', 'LuxPediaOperations'), ('NavigationEditor', 'LuxPediaNavigation')]:
+            props = wiki.object_data[('LuxPedia/Code', page, 'XWiki.ConfigurableClass')]
+            self.assertEqual(props['displayInCategory'], 'content')
+            self.assertEqual(props['displayInSection'], section)
+            self.assertIn('context="new"', props['codeToExecute'])
+            self.assertIn("hasAccess('admin'", wiki.pages[('LuxPedia/Code', page)][1])
+        for space, page in [('LuxPedia/Code', 'NavigationSettings'), ('LuxPedia/Workflow', 'AdminTools')]:
+            rule = wiki.object_data[(space, page, 'XWiki.XWikiRights')]
+            self.assertEqual(rule, {'groups': 'XWiki.LuxManagers,XWiki.XWikiAdminGroup', 'levels': 'view', 'allow': '1'})
+        self.assertIn("getMethod() == 'POST'", admin.ENDPOINT)
+        self.assertIn("getParameter('form_token')", admin.ENDPOINT)
+        self.assertIn('private, no-store', admin.PRESENTATION)
+        self.assertNotIn('adminRead', admin.PRESENTATION)
+        self.assertTrue(admin.QR_JS.startswith('(function(define,module,exports)'))
+        self.assertIn('window.LuxPediaQRCode=qrcode;', admin.QR_JS)
+        self.assertIn('MIT', (ROOT / 'scripts/ui/vendor/qrcode-generator.LICENSE').read_text())
 
 
 if __name__ == '__main__':

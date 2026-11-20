@@ -1,0 +1,50 @@
+#set($items = $services.query.xwql("where (doc.space = 'Knowledge' or doc.space like 'Knowledge.%' or doc.space = 'Drafts' or doc.space like 'Drafts.%') and doc.name <> 'WebPreferences' and doc.language = '' and doc.fullName not in ('Drafts.WebHome', 'Knowledge.WebHome', 'Knowledge.CategoryIndex', 'Knowledge.CategoryGuide', 'Knowledge.CategoryAdmin', 'Knowledge.DocumentLibrary', 'Knowledge.Archive.WebHome') order by doc.date desc").execute())
+#set($actor = "$!xcontext.userReference")
+#set($admin = $services.security.authorization.hasAccess('admin', $services.model.resolveDocument('XWiki.XWikiPreferences')))
+#set($visible = false)
+
+
+{{html clean="false"}}
+<table class="table table-striped luxpedia-system-list" data-luxpedia-browser="1" style="width:100%;overflow-wrap:anywhere">
+<thead><tr><th scope="col" data-luxpedia-i18n="title">#lp('title')</th><th scope="col" data-luxpedia-i18n="category">#lp('category')</th><th scope="col" data-luxpedia-i18n="owner">#lp('owner')</th><th scope="col" data-luxpedia-i18n="status">#lp('status')</th><th scope="col" data-luxpedia-i18n="tags">#lp('tags')</th><th scope="col" data-luxpedia-i18n="browserUpdated">#lp('browserUpdated')</th></tr></thead>
+<tbody>
+#foreach($item in $items)
+#set($article = $xwiki.getDocument($item))
+#if($article.hasAccessLevel('view') && !$article.getObject('LuxPedia.Code.CategoryClass'))
+#set($area = 'Knowledge')
+#if($item.startsWith('Drafts.'))#set($area = 'Drafts')#end
+#set($flow = false)
+#set($workspace = false)
+#set($metadata = false)
+#set($flow = $article.getObject('PublicationWorkflow.PublicationWorkflowClass'))
+#set($workspace = $article.getObject('LuxPedia.Code.DraftWorkspaceClass'))
+#set($metadata = $article.getObject('LuxPedia.Code.ArticleClass'))
+#set($state = 'published')
+#if($area == 'Drafts')#set($state = 'unstarted')#end
+#if($flow)#set($state = "$!flow.getValue('status')")#end
+#set($show = true)
+#if($area == 'Drafts' && ($state == 'published' || $state == 'archived'))#set($show = false)#end
+#if($area == 'Drafts' && $workspace && $workspace.getValue('status') == 'abandoned')
+#set($state = 'abandoned')
+#if(!$admin && $workspace.getValue('owner') != $actor)#set($show = false)#end
+#end
+#if($show)
+#set($visible = true)
+#set($category = "$!article.space")
+#set($owner = '')
+#set($tags = '')
+#if($metadata)
+#if($metadata.getValue('primaryCategory'))#set($category = "$!metadata.getValue('primaryCategory')")#end
+#set($owner = "$!metadata.getValue('owner')")
+#set($tags = "$!metadata.getValue('tagsText')")
+#end
+#set($updated = "$!article.date.time")
+<tr data-area="$escapetool.xml($area)" data-state="$escapetool.xml($state)" data-updated="$escapetool.xml($updated)">
+<td><a href="$escapetool.xml($xwiki.getURL($item))">$escapetool.xml($article.displayTitle)</a></td><td>$escapetool.xml($category)</td><td>$escapetool.xml($owner)</td><td data-luxpedia-state="$escapetool.xml($state)">#if($state == 'abandoned')#lp('abandonedTitle')#else#lp($state)#end</td><td>$escapetool.xml($tags)</td><td data-luxpedia-updated="$escapetool.xml($updated)">$escapetool.xml("$!article.date")</td>
+</tr>
+#end
+#end
+#end
+#if(!$visible)<tr data-luxpedia-empty="1"><td colspan="6">#lp('empty')</td></tr>#end
+</tbody></table>
+{{/html}}

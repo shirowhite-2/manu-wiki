@@ -34,7 +34,17 @@ python3 tests/sprint1_smoke.py
 
 ## 交付与记录
 
+- [网站角色与部门分类权限、策略 13 升级](docs/department-roles.md)
+- [原生管理员界面、批量恢复、导航与最新升级命令](docs/admin-tools.md)
 - [当前角色、百科/编写区流程与部署](docs/roles-and-interface.md)
+- [页面浏览器、正文组件与 Excel/CSV 导出](docs/content-tools.md)
+- [草稿独占编辑、24 小时释放与升级](docs/edit-locks.md)
+- [管理员文章模板中心与创建入口](docs/article-templates.md)
+- [默认翻译宏与中英文词条用法](docs/translation-macro.md)
+- [GitHub、Bitbucket 等外部链接与导入样式](docs/external-links.md)
+- [draw.io 分享链接与图表预览](docs/drawio.md)
+- [图片、视频与附件插入正文](docs/attachments-in-content.md)
+- [标题收藏按钮与我的收藏](docs/personal-favorites.md)
 - [Word、视频与大批量资料迁入](docs/bulk-import.md)（含只读目录盘点、CSV 分批和存储规划）
 - [Sprint 1 角色、分类与文章结构](docs/sprint1.md)
 - [部署、启动、备份和恢复](docs/deployment.md)

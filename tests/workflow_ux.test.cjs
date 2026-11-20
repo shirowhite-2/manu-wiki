@@ -14,6 +14,14 @@ const extracted = spawnSync('python3', ['-c',
   'import runpy, sys; print(runpy.run_path(sys.argv[1])["WORKFLOW_UX_JS"])', source], { encoding: 'utf8' });
 assert.equal(extracted.status, 0, extracted.stderr);
 const ux = extracted.stdout;
+const nativeAssets = {
+  '/test/jquery.js': fs.readFileSync(require.resolve('jquery/dist/jquery.js'), 'utf8'),
+  '/test/jstree.js': fs.readFileSync(require.resolve('jstree/dist/jstree.js'), 'utf8'),
+  '/test/bootstrap.js': fs.readFileSync(require.resolve('bootstrap/dist/js/bootstrap.js'), 'utf8'),
+  '/test/bootstrap.css': fs.readFileSync(require.resolve('bootstrap/dist/css/bootstrap.css'), 'utf8'),
+  '/test/tree.css': fs.readFileSync(require.resolve('jstree/dist/themes/default/style.css'), 'utf8').replaceAll('jstree-default', 'jstree-xwiki'),
+  '/test/xwiki-tree.js': fs.readFileSync(path.join(__dirname, 'vendor/xwiki-tree-17.10.15.js'), 'utf8'),
+};
 const prefix = 'luxpedia.workflow.submit.';
 let browser;
 before(async () => { browser = await chromium.launch({
@@ -33,6 +41,7 @@ async function wikiFixture(options = {}) {
     target: options.linkedTarget || '',
     category: options.primaryCategory || '',
     hasArticle: options.hasArticle !== false,
+    leaseStatus: options.leaseStatus || 'owned', leaseGeneration: 'lease-fixture', leaseActions: [], savedHeaders: [], leaseExpiresAt: Date.now() + 86400000,
     actions: [], alerts: [], errors: [], withdrawals: [], workspaceActions: [], confirmations: 0,
   };
   const workspaceStates = { [reference]: !!options.abandoned };
@@ -49,6 +58,18 @@ async function wikiFixture(options = {}) {
   }
   const linkedDraftReference = options.draftReference || 'Drafts.Linked.Article';
   const linkedDraftPath = options.draftPath || '/bin/view/' + linkedDraftReference.split('.').join('/');
+  const escapeAttribute = value => String(value).replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
+  function nativeCategoryMarkup() {
+    const config = options.nativeCategory;
+    if (!config) { return ''; }
+    const id = config.id || 'LuxPedia.Code.ArticleClass_0_primaryCategory';
+    const name = config.name || id;
+    return `<dl id="article-properties"><dt><label for="${escapeAttribute(id)}">Category</label></dt><dd>
+      <select id="${escapeAttribute(id)}" name="${escapeAttribute(name)}" class="native-property-widget"
+        onchange="window.nativeCategoryChanges=(window.nativeCategoryChanges||0)+1">
+        ${config.values.map(([value, label]) => `<option value="${escapeAttribute(value)}"${value === config.selected ? ' selected' : ''}>${escapeAttribute(label)}</option>`).join('')}
+      </select></dd></dl>`;
+  }
   function html(edit, requestedLanguage) {
     const nativeLanguage = requestedLanguage || options.serverLanguage || '';
     const start = form('start', `<input name="targetSpace" value="Drafts">
@@ -63,14 +84,22 @@ async function wikiFixture(options = {}) {
         `<form method="get" action="${linkedDraftPath}"><input type="submit" value="Go to draft"></form>` :
         options.noDraftForm ? '' : form('getEditableDraft')) + form('archive') + form('unpublish') :
       state.status === 'archived' ? form('publishfromarchive') + form('backtodraft') : '';
-    return `<!doctype html><html lang="${nativeLanguage}"><title>Local workflow test fixture — production theme not loaded</title><meta name="document" content="${reference}">
+    return `<!doctype html><html lang="${nativeLanguage}"${options.flamingo ? ' data-xwiki-reference="xwiki:' + reference + '"' : ''}><title>Local workflow test fixture — production theme not loaded</title>${options.flamingo ? '' : '<meta name="document" content="' + reference + '">'}
+      <link rel="stylesheet" href="/test/bootstrap.css"><link rel="stylesheet" href="/test/tree.css">
+      <script src="/test/jquery.js"></script><script src="/test/jstree.js"></script><script src="/test/bootstrap.js"></script>
+      <script>window.define=function(deps,factory){factory(window.jQuery,{delayPageReady:function(){}},function(){});};</script>
+      <script src="/test/xwiki-tree.js"></script>
+      <script>delete window.define; window.require=function(deps,ready,fail){
+        window.requestedTreeModules=deps;
+        ${options.treeLoadFailure ? 'fail();' : 'ready(window.jQuery);'}
+      };</script>
       ${options.navbar ? '<header id="headerglobal"><nav id="menuview"><ul class="navbar-right"><li id="original-menu">Original menu</li></ul></nav></header>' : ''}
       <p role="note">Local test fixture. The production LuxPedia theme is not loaded.</p>
       <div data-xwiki-form-token="test-token"></div>
       <a id="tmUser" href="/bin/view/XWiki/${options.admin ? 'Admin' : 'editor'}">Profile</a>
       ${options.nativeEdit ? '<a id="tmEdit" href="' + editPath + '">Edit</a>' : ''}
       <div id="document-title"><h1>New article</h1></div>
-      ${edit ? `<div><textarea id="xwikieditor"></textarea></div>
+      ${edit ? `${options.lateNativeCategory ? '' : nativeCategoryMarkup()}<div><textarea id="xwikieditor"></textarea></div>
         <button class="realtime-action-done" onclick="location.href='${viewPath}'">Done</button>` : '<div class="panel"><h2 class="panel-title">Workflow</h2><div class="publicationworkflow-info">' + workflow + '</div></div>'}
       ${options.list ? '<div id="luxpedia-workspace-list"><button type="button">Abandon selected drafts</button></div>' +
         options.list.map(name => '<input type="checkbox" class="luxpedia-draft-select" data-reference="' + name + '" data-version="4.2">').join('') : ''}
@@ -81,7 +110,40 @@ async function wikiFixture(options = {}) {
     const request = route.request();
     const url = new URL(request.url());
     const pathname = decodeURIComponent(url.pathname);
+    if (nativeAssets[pathname]) {
+      return route.fulfill({ contentType: pathname.endsWith('.css') ? 'text/css' : 'text/javascript', body: nativeAssets[pathname] });
+    }
     const json = body => route.fulfill({ json: body });
+    if (pathname === '/bin/get/LuxPedia/Workflow/EditLock') {
+      const fields = Object.fromEntries(new URLSearchParams(request.postData()));
+      const name = fields.reference || url.searchParams.get('reference');
+      let leaseState = state.leaseStatus;
+      if (request.method() === 'POST') {
+        assert.equal(fields.form_token, 'test-token');
+        state.leaseActions.push(fields);
+        if (fields.operation === 'open') {
+          if (options.draftLookupStatus && options.draftLookupStatus !== 404) { return json({ status: 'unavailable' }); }
+          if (!options.existingDraftState || options.draftLookupStatus === 404) {
+            state.actions.push({ action: 'getEditableDraft', workflowdoc: name, form_token: fields.form_token });
+          }
+          reference = linkedDraftReference; viewPath = linkedDraftPath; editPath = viewPath.replace('/view/', '/edit/');
+          state.status = options.existingDraftState && options.draftLookupStatus !== 404 ? options.existingDraftState : 'draft';
+        } else if (fields.operation === 'claim' && state.leaseStatus === 'free') {
+          state.leaseStatus = 'owned'; state.leaseGeneration = 'next-lease';
+        } else if (['release', 'force-release'].includes(fields.operation)) {
+          assert.equal(fields.luxpedia_edit_lease, state.leaseGeneration); state.leaseStatus = 'free';
+        }
+        leaseState = state.leaseStatus;
+      }
+      if (['validating', 'valid', 'published', 'archived'].includes(state.status) || workspaceStates[name]) { leaseState = 'locked'; }
+      return json({ status: leaseState, reference: fields.operation === 'open' ? reference : name,
+        owner: leaseState === 'busy' ? 'xwiki:XWiki.otherEditor' : 'xwiki:XWiki.editor',
+        expiresAt: leaseState === 'free' ? '' : String(state.leaseExpiresAt),
+        generation: leaseState === 'owned' || options.admin ? state.leaseGeneration : '',
+        canClaim: !['reader', 'reviewer'].includes(options.role) && ['free', 'owned'].includes(leaseState),
+        canForce: !!options.admin && ['owned', 'busy'].includes(leaseState),
+        viewURL: viewPath, editURL: editPath });
+    }
     if (pathname === '/bin/get/LuxPedia/Workflow/DraftWorkspace') {
       const name = url.searchParams.get('reference');
       const actor = options.admin || !['reviewer', 'reader'].includes(options.role);
@@ -97,7 +159,7 @@ async function wikiFixture(options = {}) {
       const restoring = fields.operation === 'restore';
       if (!actor || !['', 'draft'].includes(state.status) || restoring !== !!workspaceStates[fields.reference] ||
           !restoring && !canAbandon) { return route.fulfill({ body: 'WORKSPACE_FORBIDDEN' }); }
-      workspaceStates[fields.reference] = !restoring;
+      workspaceStates[fields.reference] = !restoring; if (fields.reference === reference) { state.leaseStatus = 'free'; }
       return route.fulfill({ body: restoring ? 'DRAFT_RESTORED' : 'DRAFT_ABANDONED' });
     }
     if (pathname === '/bin/get/LuxPedia/Workflow/Actions') {
@@ -109,7 +171,7 @@ async function wikiFixture(options = {}) {
       if (options.withdrawFail || fields.version !== '4.2' || fields.form_token !== 'test-token') {
         return route.fulfill({ body: 'WITHDRAW_CONFLICT' });
       }
-      state.status = 'draft'; return route.fulfill({ body: 'WITHDRAWN' });
+      state.status = 'draft'; state.leaseStatus = 'free'; return route.fulfill({ body: 'WITHDRAWN' });
     }
     if (pathname.endsWith('/PublicationWorkflow/Script')) {
       const fields = Object.fromEntries(new URLSearchParams(request.postData()));
@@ -140,8 +202,14 @@ async function wikiFixture(options = {}) {
     }
     if (pathname === '/bin/view/Knowledge/CategoryIndex') {
       return route.fulfill({ contentType: 'text/html', body:
-        '<a href="/bin/view/Knowledge/Technical/WebHome">技术文档</a>' +
-        '<a href="/bin/view/Knowledge/Operations/WebHome">操作手册</a>' });
+        '<a href="/bin/view/XWiki/WebHome">System</a><a href="/bin/view/Knowledge/NotACategory/WebHome">Navigation</a>' +
+        '<table class="luxpedia-system-list"><tr><td><a href="/bin/view/Knowledge/Technical/WebHome">技术文档</a>' +
+        '<a href="/bin/view/Knowledge/Operations/WebHome">操作手册</a>' +
+        (options.nestedCategories ? '<a href="/bin/view/Knowledge/Technical/Maintenance/WebHome">Maintenance</a>' +
+          '<a href="/bin/view/Knowledge/Technical/Maintenance/Checks/WebHome">Checks &lt;安全&gt;</a>' : '') +
+        '<a href="/bin/view/Drafts/Private/WebHome">Draft</a>' +
+        '<a href="https://other.example/bin/view/Knowledge/Foreign/WebHome">Foreign</a>' +
+        '</td></tr></table>' });
     }
     if (pathname === '/bin/get/LuxPedia/Workflow/CurrentRoles') {
       return route.fulfill({ contentType: 'text/plain', body: JSON.stringify({
@@ -154,6 +222,10 @@ async function wikiFixture(options = {}) {
       viewPath = linkedDraftPath;
       editPath = viewPath.replace('/view/', '/edit/');
       state.status = options.existingDraftState;
+    }
+    if (pathname.startsWith('/rest/') && pathname.endsWith('/attachments/probe.png') && request.method() === 'POST') {
+      const generation = request.headers()['x-luxpedia-edit-lease']; state.savedHeaders.push(generation);
+      return route.fulfill({ status: generation === state.leaseGeneration && state.leaseStatus === 'owned' ? 200 : 403, body: 'probe' });
     }
     if (pathname.startsWith('/rest/')) {
       const linkedParts = linkedDraftPath.slice('/bin/view/'.length).split('/').filter(Boolean);
@@ -201,7 +273,7 @@ async function wikiFixture(options = {}) {
     for await (const chunk of request) { body += chunk; }
     try {
       await handle({
-        request: () => ({ url: () => origin + request.url,
+        request: () => ({ url: () => origin + request.url, headers: () => request.headers,
           method: () => request.method, postData: () => body }),
         fulfill: async result => {
           response.writeHead(result.status || 200, { ...result.headers,
@@ -218,11 +290,27 @@ async function wikiFixture(options = {}) {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = 'http://127.0.0.1:' + server.address().port;
   context.on('close', () => server.close());
+  async function chooseCategory(key) {
+    await page.locator('#luxpedia-category-toggle').click();
+    const id = key === '__root__' ? 'publication-category-root' : 'publication-category-' + encodeURIComponent(key);
+    await page.waitForFunction(id => window.jQuery?.jstree.reference(document.getElementById('luxpedia-category-tree'))?.get_node(id), id);
+    const parents = await page.evaluate(id => window.jQuery.jstree.reference(document.getElementById('luxpedia-category-tree')).get_node(id).parents.slice().reverse(), id);
+    for (const parent of parents.filter(parent => parent !== '#')) {
+      const item = page.locator('[id="' + parent + '"]');
+      if (await item.locator(':scope > .jstree-anchor').getAttribute('aria-expanded') === 'false') {
+        await item.locator(':scope > .jstree-ocl').click();
+      }
+    }
+    await page.locator('[id="' + id + '"] > .jstree-anchor').click();
+  }
   async function preview(category) {
     await page.goto(origin + editPath);
     if (!options.linkedTarget) {
-      await page.locator('#luxpedia-publish-category').waitFor();
-      if (category !== undefined) { await page.selectOption('#luxpedia-publish-category', category); }
+      const selector = options.nativeCategory && !options.lateNativeCategory ?
+        'select[data-luxpedia-publication-category]' : '#luxpedia-publish-category';
+      await page.locator(selector).waitFor({ state: 'attached' });
+      await page.locator('#luxpedia-category-toggle').waitFor();
+      if (category !== undefined) { await chooseCategory(category); }
     } else {
       await page.locator('#luxpedia-category-choice').waitFor();
       assert.equal(await page.locator('#luxpedia-publish-category').count(), 0);
@@ -258,8 +346,200 @@ async function wikiFixture(options = {}) {
       assert.equal(start.workflow, 'LuxPedia.Workflow.Config');
     }
   }
-  return { context, page, state, preview, submit, expectPending, pendingKey, origin };
+  return { context, page, state, preview, submit, expectPending, pendingKey, origin, nativeCategoryMarkup, chooseCategory };
 }
+
+for (const value of ['Operations', '操作手册', 'Knowledge.Operations.WebHome', 'xwiki:Knowledge.Operations.WebHome']) {
+  test('native article category is reused and preserves its stored value: ' + value, async () => {
+    const wiki = await wikiFixture({ nativeCategory: {
+      values: [['', 'Knowledge'], [value, '操作手册']], selected: value,
+    } });
+    try {
+      await wiki.submit();
+      await wiki.expectPending('Knowledge.Operations.NewArticle');
+      assert.equal(wiki.state.category, value);
+    } finally { await wiki.context.close(); }
+  });
+}
+
+test('native property node, selection, options and event bindings survive language changes', async () => {
+  const wiki = await wikiFixture({ nativeCategory: {
+    values: [['', 'Knowledge'], ['Operations', '操作手册'], ['Technical', '技术文档']], selected: 'Operations',
+  } });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
+    const native = wiki.page.locator('select[data-luxpedia-publication-category]');
+    await native.waitFor({ state: 'attached' });
+    assert.equal(await wiki.page.locator('#luxpedia-category-choice').count(), 1);
+    assert.equal(await native.isVisible(), false);
+    await wiki.page.evaluate(() => { window.originalCategory = document.querySelector('select[data-luxpedia-publication-category]'); });
+    assert.equal(await native.inputValue(), 'Operations');
+    assert.equal(await native.getAttribute('name'), 'LuxPedia.Code.ArticleClass_0_primaryCategory');
+    assert.equal(await native.getAttribute('class'), 'native-property-widget');
+    await wiki.page.fill('#xwikieditor', 'Unsaved article');
+    await wiki.chooseCategory('Technical');
+    const url = wiki.page.url();
+    await wiki.page.selectOption('#luxpedia-language-select', 'zh');
+    assert.equal(wiki.page.url(), url);
+    assert.equal(await wiki.page.locator('#xwikieditor').inputValue(), 'Unsaved article');
+    assert.equal(await native.inputValue(), 'Technical');
+    assert.deepEqual(await native.locator('option').allTextContents(), ['Knowledge', '操作手册', '技术文档']);
+    assert.equal(await wiki.page.evaluate(() => window.originalCategory === document.querySelector('select[data-luxpedia-publication-category]')), true);
+    assert.equal(await wiki.page.evaluate(() => window.nativeCategoryChanges), 1);
+    await wiki.page.locator('.realtime-action-done').click();
+    await wiki.page.locator('#luxpedia-submit-review').click();
+    await wiki.expectPending('Knowledge.Technical.NewArticle');
+  } finally { await wiki.context.close(); }
+});
+
+test('generic native category field maps its option label to the workflow category', async () => {
+  const wiki = await wikiFixture({ nativeCategory: { name: 'category', id: 'native-category',
+    values: [['category-42', '操作手册']], selected: 'category-42',
+  } });
+  try {
+    await wiki.submit();
+    await wiki.expectPending('Knowledge.Operations.NewArticle');
+    assert.equal(wiki.state.category, '操作手册');
+  } finally { await wiki.context.close(); }
+});
+
+test('native root selection overrides a nested draft location', async () => {
+  const wiki = await wikiFixture({ reference: 'Drafts.Technical.NewArticle.WebHome', nativeCategory: {
+    values: [['Knowledge.WebHome', 'Knowledge'], ['Technical', '技术文档']], selected: 'Knowledge.WebHome',
+  } });
+  try {
+    await wiki.submit();
+    await wiki.expectPending('Knowledge.NewArticle');
+  } finally { await wiki.context.close(); }
+});
+
+for (const value of ['otherwiki:Knowledge.Operations.WebHome', 'unknown-category']) {
+  test('invalid native category blocks submission and repeated retries: ' + value, async () => {
+    const wiki = await wikiFixture({ nativeCategory: { values: [[value, 'Unknown']], selected: value } });
+    try {
+      await wiki.preview();
+      assert.equal(wiki.state.alerts.length, 1);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await wiki.page.locator('#luxpedia-submit-review').click();
+        await wiki.page.waitForFunction(() => document.querySelector('#luxpedia-submit-review') &&
+          !document.querySelector('#luxpedia-submit-review').disabled);
+        assert.equal(wiki.state.alerts.length, attempt + 2);
+        assert.equal(wiki.state.actions.length, 0);
+      }
+      assert.equal(wiki.state.status, '');
+      assert.deepEqual(wiki.state.errors, []);
+    } finally { await wiki.context.close(); }
+  });
+}
+
+test('late native property replaces fallback without losing a changed category or body', async () => {
+  const wiki = await wikiFixture({ lateNativeCategory: true, nativeCategory: {
+    values: [['Knowledge.WebHome', 'Knowledge'], ['Technical', '技术文档']], selected: 'Knowledge.WebHome',
+  } });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
+    await wiki.chooseCategory('Technical');
+    await wiki.page.fill('#xwikieditor', 'Keep this draft');
+    await wiki.page.evaluate(markup => document.querySelector('#xwikieditor').insertAdjacentHTML('beforebegin', markup), wiki.nativeCategoryMarkup());
+    const native = wiki.page.locator('select[data-luxpedia-publication-category]');
+    await native.waitFor({ state: 'attached' });
+    assert.equal(await native.inputValue(), 'Technical');
+    assert.equal(await wiki.page.locator('#luxpedia-publish-category').count(), 0);
+    assert.equal(await wiki.page.locator('#xwikieditor').inputValue(), 'Keep this draft');
+    await wiki.page.locator('.realtime-action-done').click();
+    await wiki.page.locator('#luxpedia-submit-review').click();
+    await wiki.expectPending('Knowledge.Technical.NewArticle');
+  } finally { await wiki.context.close(); }
+});
+
+test('native breadcrumb tree exposes only Knowledge categories and preserves expansion without navigation', async () => {
+  const wiki = await wikiFixture({ nestedCategories: true });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
+    await wiki.page.fill('#xwikieditor', 'Unsaved content');
+    const url = wiki.page.url();
+    await wiki.page.locator('#luxpedia-category-toggle').click();
+    await wiki.page.locator('#publication-category-root').waitFor();
+    const tree = await wiki.page.evaluate(() => {
+      const instance = window.jQuery.jstree.reference(document.getElementById('luxpedia-category-tree'));
+      return { data: instance.get_json('#', { flat: true }).map(node => node.text),
+        editable: instance.settings.core.check_callback, plugins: instance.settings.plugins,
+        multiple: instance.settings.core.multiple, modules: window.requestedTreeModules };
+    });
+    assert.deepEqual(tree.modules, ['xwiki-tree', 'bootstrap']);
+    assert.deepEqual(tree.data, ['Knowledge', '技术文档', 'Maintenance', 'Checks <安全>', '操作手册']);
+    assert.equal(tree.editable, false);
+    assert.equal(tree.multiple, false);
+    assert.deepEqual(tree.plugins, []);
+    assert.equal(await wiki.page.locator('#luxpedia-publish-category').isVisible(), false);
+    await wiki.page.locator('[id="publication-category-Technical"] > .jstree-ocl').click();
+    assert.equal(await wiki.page.locator('#luxpedia-category-tree').isVisible(), true);
+    assert.equal(wiki.page.url(), url);
+    assert.equal(await wiki.page.locator('#xwikieditor').inputValue(), 'Unsaved content');
+    assert.equal(await wiki.page.locator('#luxpedia-publish-category').inputValue(), '__root__');
+    await wiki.page.keyboard.press('Escape');
+    assert.equal(await wiki.page.locator('#luxpedia-category-tree').isVisible(), false);
+    assert.equal(await wiki.page.locator('#luxpedia-publish-category').inputValue(), '__root__');
+    assert.deepEqual(wiki.state.actions, []);
+    assert.deepEqual(wiki.state.errors, []);
+  } finally { await wiki.context.close(); }
+});
+
+test('selecting a nested category closes the native menu and submits to that exact destination', async () => {
+  const wiki = await wikiFixture({ nestedCategories: true });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
+    await wiki.chooseCategory('Technical.Maintenance.Checks');
+    assert.equal(await wiki.page.locator('#luxpedia-category-tree').isVisible(), false);
+    assert.equal(await wiki.page.locator('#luxpedia-category-selected').textContent(), 'Checks <安全>');
+    assert.equal(await wiki.page.locator('#luxpedia-category-selected script').count(), 0);
+    assert.equal(await wiki.page.locator('#luxpedia-category-toggle').getAttribute('aria-expanded'), 'false');
+    await wiki.page.locator('.realtime-action-done').click();
+    await wiki.page.locator('#luxpedia-submit-review').click();
+    await wiki.expectPending('Knowledge.Technical.Maintenance.Checks.NewArticle');
+  } finally { await wiki.context.close(); }
+});
+
+test('language switching keeps the expanded tree and category without invoking a server tree job', async () => {
+  const wiki = await wikiFixture({ nestedCategories: true });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
+    await wiki.chooseCategory('Technical.Maintenance');
+    await wiki.page.locator('#luxpedia-category-toggle').click();
+    await wiki.page.selectOption('#luxpedia-language-select', 'zh');
+    assert.equal(await wiki.page.locator('#luxpedia-category-selected').textContent(), 'Maintenance');
+    assert.equal(await wiki.page.locator('#luxpedia-category-toggle').getAttribute('aria-label'), '浏览知识库分类');
+    assert.equal(await wiki.page.locator('#publication-category-root > .jstree-anchor').textContent(), '知识库');
+    assert.equal(await wiki.page.locator('#luxpedia-publish-category').inputValue(), 'Technical.Maintenance');
+    assert.deepEqual(wiki.state.errors, []);
+    assert.deepEqual(wiki.state.actions, []);
+  } finally { await wiki.context.close(); }
+});
+
+test('a saved nested category reference is restored in the picker and used after preview', async () => {
+  const wiki = await wikiFixture({ nestedCategories: true, primaryCategory: 'xwiki:Knowledge.Technical.Maintenance.WebHome' });
+  try {
+    await wiki.submit();
+    await wiki.expectPending('Knowledge.Technical.Maintenance.NewArticle');
+  } finally { await wiki.context.close(); }
+});
+
+test('native category-browser load failure preserves the draft and blocks a wrong submission', async () => {
+  const wiki = await wikiFixture({ treeLoadFailure: true });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
+    await wiki.page.locator('#luxpedia-category-tree-error').waitFor();
+    assert.match(await wiki.page.locator('#luxpedia-category-tree-error').textContent(), /could not load/);
+    await wiki.preview();
+    assert.equal(wiki.state.alerts.length, 1);
+    await wiki.page.locator('#luxpedia-submit-review').click();
+    await wiki.page.waitForFunction(() => !document.querySelector('#luxpedia-submit-review').disabled);
+    assert.equal(wiki.state.alerts.length, 2);
+    assert.deepEqual(wiki.state.actions, []);
+    assert.equal(wiki.state.status, '');
+    assert.deepEqual(wiki.state.errors, []);
+  } finally { await wiki.context.close(); }
+});
 
 for (const scenario of [
   { name: 'normal nested page uses its article name in the selected category',
@@ -277,6 +557,10 @@ for (const scenario of [
     reference: 'Drafts.Technical.NewArticle.WebHome', target: 'Knowledge.Technical.NewArticle' },
   { name: 'primary category supplies the default selection',
     primaryCategory: '技术文档', target: 'Knowledge.Technical.NewArticle' },
+  { name: 'reopened native category references supply the default selection',
+    primaryCategory: 'xwiki:Knowledge.Operations.WebHome', target: 'Knowledge.Operations.NewArticle' },
+  { name: 'reopened explicit native root selection overrides the draft folder',
+    reference: 'Drafts.Technical.NewArticle.WebHome', primaryCategory: 'Knowledge.WebHome', target: 'Knowledge.NewArticle' },
   { name: 'linked published article keeps the exact original target',
     linkedTarget: 'Knowledge.Operations.Existing.WebHome', target: 'Knowledge.Operations.Existing.WebHome' },
 ]) {
@@ -315,6 +599,63 @@ test('administrator keeps the standard Done button', async () => {
     assert.equal(await wiki.page.locator('.realtime-action-done').textContent(), 'Done');
     assert.equal(await wiki.page.locator('#luxpedia-publish-category').count(), 0);
     assert.equal(wiki.state.actions.length, 0);
+  } finally { await wiki.context.close(); }
+});
+
+for (const flamingo of [false, true]) {
+  test('admin gets a visible native template-creation shortcut and center link ' + JSON.stringify({ flamingo }), async () => {
+    const wiki = await wikiFixture({ admin: true, navbar: true, flamingo });
+    try {
+      await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
+      const create = wiki.page.locator('#luxpedia-create-article-template');
+      await create.waitFor();
+      assert.equal(await create.textContent(), 'Create article template');
+      assert.equal(await wiki.page.locator('#menuview .navbar-right > #luxpedia-template-admin').count(), 1);
+      const url = new URL(await create.getAttribute('href'), wiki.origin);
+      assert.equal(url.pathname, '/bin/create/LuxPedia/Templates/WebHome');
+      assert.equal(url.searchParams.get('spaceReference'), 'LuxPedia.Templates');
+      assert.equal(url.searchParams.get('template'), 'LuxPedia.Code.ArticleTemplateSeed');
+      assert.equal(await wiki.page.locator('#luxpedia-open-template-center').getAttribute('href'), '/bin/view/LuxPedia/Templates/');
+      await wiki.page.fill('#xwikieditor', 'Unsaved article');
+      const current = wiki.page.url();
+      await wiki.page.selectOption('#luxpedia-language-select', 'zh');
+      assert.equal(wiki.page.url(), current);
+      assert.equal(await create.textContent(), '创建文章模板');
+      assert.equal(await wiki.page.locator('#luxpedia-open-template-center').textContent(), '文章模板');
+      assert.equal(await wiki.page.locator('#xwikieditor').inputValue(), 'Unsaved article');
+      assert.equal(await wiki.page.locator('#original-menu').textContent(), 'Original menu');
+      assert.equal(await wiki.page.locator('#luxpedia-template-admin').count(), 1);
+      assert.deepEqual(wiki.state.actions, []);
+      assert.deepEqual(wiki.state.errors, []);
+    } finally { await wiki.context.close(); }
+  });
+}
+
+for (const role of ['editor', 'reviewer', 'reader']) {
+  test('template admin shortcuts are absent for ' + role, async () => {
+    const wiki = await wikiFixture({ role, navbar: true });
+    try {
+      const checked = wiki.page.waitForResponse(response => response.url().includes('/Workflow/CurrentRoles?'));
+      await wiki.page.goto(wiki.origin + '/bin/view/Drafts/NewArticle/WebHome');
+      await checked;
+      await wiki.page.waitForFunction(() => document.querySelector('#luxpedia-language-select'));
+      assert.equal(await wiki.page.locator('#luxpedia-template-admin').count(), 0);
+      assert.deepEqual(wiki.state.errors, []);
+    } finally { await wiki.context.close(); }
+  });
+}
+
+test('admin template shortcuts move into a delayed native navigation bar without duplicates', async () => {
+  const wiki = await wikiFixture({ admin: true });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
+    await wiki.page.locator('#luxpedia-create-article-template').waitFor();
+    await wiki.page.evaluate(() => {
+      document.body.insertAdjacentHTML('afterbegin', '<header id="headerglobal"><nav id="menuview"><ul class="navbar-right"></ul></nav></header>');
+    });
+    await wiki.page.locator('#menuview .navbar-right > #luxpedia-template-admin').waitFor();
+    assert.equal(await wiki.page.locator('#luxpedia-template-admin').count(), 1);
+    assert.deepEqual(wiki.state.errors, []);
   } finally { await wiki.context.close(); }
 });
 
@@ -362,9 +703,9 @@ test('language switching in the editor preserves unsaved text and the selected c
   const wiki = await wikiFixture();
   try {
     await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
-    await wiki.page.locator('#luxpedia-publish-category').waitFor();
+    await wiki.page.locator('#luxpedia-category-toggle').waitFor();
     await wiki.page.fill('#xwikieditor', 'Unsaved text 未保存的正文');
-    await wiki.page.selectOption('#luxpedia-publish-category', 'Technical');
+    await wiki.chooseCategory('Technical');
     const url = wiki.page.url();
     await wiki.page.selectOption('#luxpedia-language-select', 'zh');
     assert.equal(wiki.page.url(), url);
@@ -474,7 +815,8 @@ test('submitter can withdraw a pending request using POST and CSRF then edit aga
   try {
     await wiki.page.goto(wiki.origin + '/bin/view/Drafts/NewArticle/WebHome');
     await wiki.page.locator('#luxpedia-withdraw-review').click();
-    await wiki.page.locator('#luxpedia-continue-editing').waitFor();
+    await wiki.page.locator('#luxpedia-claim-edit').click();
+    await wiki.page.waitForURL(/\/bin\/edit\/Drafts\//);
     assert.equal(wiki.state.status, 'draft');
     assert.equal(wiki.state.withdrawals.length, 1);
     assert.equal(wiki.state.withdrawals[0].reference, 'Drafts.NewArticle.WebHome');
@@ -593,7 +935,7 @@ for (const status of [401, 403, 500]) {
       await wiki.page.goto(wiki.origin + '/bin/view/Knowledge/Technical/Article');
       await wiki.page.locator('#luxpedia-edit-article').click();
       await wiki.page.waitForFunction(() => !document.querySelector('#luxpedia-edit-article').disabled);
-      assert.match(wiki.state.alerts[0], status === 401 || status === 403 ? /do not have permission/i : /draft could not be opened/i);
+      assert.match(wiki.state.alerts[0], /Cannot acquire editing right/i);
       assert.match(wiki.page.url(), /Knowledge\/Technical\/Article/);
       assert.deepEqual(wiki.state.actions, []);
       assert.deepEqual(wiki.state.errors, []);
@@ -619,7 +961,8 @@ test('owner can abandon and restore a saved draft without publishing or deleting
     assert.equal(await wiki.page.locator('#luxpedia-submit-review').count(), 0);
     assert.equal(await wiki.page.locator('#luxpedia-continue-editing').count(), 0);
     await wiki.page.locator('#luxpedia-restore-draft').click();
-    await wiki.page.locator('#luxpedia-submit-review').waitFor();
+    await wiki.page.locator('#luxpedia-claim-edit').click();
+    await wiki.page.waitForURL(/\/bin\/edit\/Drafts\//);
     assert.deepEqual(wiki.state.workspaceActions.map(action => action.operation), ['abandon', 'restore']);
     assert.deepEqual(wiki.state.actions, []);
     assert.equal(await wiki.page.locator('#user-content').textContent(), '用户撰写的正文 stays unchanged.');
@@ -750,5 +1093,93 @@ test('writing-area home is editable without being treated as a publication draft
     assert.equal(await wiki.page.locator('#luxpedia-publish-category').count(), 0);
     assert.equal(await wiki.page.locator('.realtime-action-done').getAttribute('data-luxpedia-preview-bound'), null);
     assert.equal(wiki.state.actions.length, 0);
+  } finally { await wiki.context.close(); }
+});
+
+test('a second editor can read the shared draft but cannot save or submit it', async () => {
+  const wiki = await wikiFixture({ status: 'draft', linkedTarget: 'Knowledge.Article', leaseStatus: 'busy', nativeEdit: true });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/view/Drafts/NewArticle/WebHome');
+    await wiki.page.locator('#luxpedia-edit-lease').waitFor();
+    assert.match(await wiki.page.locator('#luxpedia-edit-lease p').textContent(), /otherEditor.*editing/);
+    assert.equal(await wiki.page.locator('#luxpedia-submit-review').isVisible(), false);
+    await wiki.page.locator('#tmEdit').click();
+    assert.match(wiki.page.url(), /\/bin\/view\/Drafts\//);
+    assert.equal(wiki.state.leaseActions.length, 0);
+    await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
+    await wiki.page.locator('#luxpedia-edit-lease').waitFor();
+    assert.equal(await wiki.page.locator('.realtime-action-done').isDisabled(), true);
+  } finally { await wiki.context.close(); }
+});
+
+test('a free draft is explicitly claimed and opens the same saved draft', async () => {
+  const wiki = await wikiFixture({ status: 'draft', linkedTarget: 'Knowledge.Article', leaseStatus: 'free' });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/view/Drafts/NewArticle/WebHome');
+    await wiki.page.locator('#luxpedia-claim-edit').click();
+    await wiki.page.waitForURL(/\/bin\/edit\/Drafts\/NewArticle\/WebHome/);
+    await wiki.page.locator('#luxpedia-edit-lease').waitFor();
+    assert.equal(wiki.state.leaseActions.length, 1);
+    assert.equal(wiki.state.leaseActions[0].operation, 'claim');
+    assert.equal(await wiki.page.evaluate(() => sessionStorage.getItem('luxpedia.workflow.lease.XWiki.editor.Drafts.NewArticle.WebHome')), 'next-lease');
+    assert.equal(wiki.state.actions.length, 0);
+  } finally { await wiki.context.close(); }
+});
+
+test('losing a lease keeps the unsaved buffer and never adopts a newer generation silently', async () => {
+  const wiki = await wikiFixture({ status: 'draft', linkedTarget: 'Knowledge.Article' });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
+    await wiki.page.locator('#luxpedia-edit-lease').waitFor();
+    await wiki.page.locator('#xwikieditor').fill('Keep my unfinished content');
+    wiki.state.leaseGeneration = 'new-session-generation';
+    await wiki.page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await wiki.page.waitForFunction(() => document.querySelector('#luxpedia-edit-lease p')?.textContent.includes('has ended'));
+    assert.equal(await wiki.page.locator('#xwikieditor').inputValue(), 'Keep my unfinished content');
+    assert.equal(await wiki.page.locator('.realtime-action-done').isDisabled(), true);
+    assert.equal(await wiki.page.evaluate(() => sessionStorage.getItem('luxpedia.workflow.lease.XWiki.editor.Drafts.NewArticle.WebHome')), 'lease-fixture');
+  } finally { await wiki.context.close(); }
+});
+
+test('save and release persists preview metadata before releasing the editing right', async () => {
+  const wiki = await wikiFixture({ status: 'draft', linkedTarget: 'Knowledge.Article' });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
+    await wiki.page.locator('#luxpedia-save-release').click();
+    await wiki.page.waitForFunction(() => document.querySelector('#luxpedia-edit-lease p')?.textContent.includes('available'));
+    assert.equal(wiki.state.leaseActions.filter(action => action.operation === 'release').length, 1);
+    assert.equal(wiki.state.leaseActions[0].luxpedia_edit_lease, 'lease-fixture');
+    assert.equal(wiki.state.status, 'draft');
+    assert.equal(wiki.state.actions.length, 0);
+  } finally { await wiki.context.close(); }
+});
+
+test('both fetch and native AJAX attachment writes carry the captured lease generation', async () => {
+  const wiki = await wikiFixture({ status: 'draft', linkedTarget: 'Knowledge.Article' });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
+    await wiki.page.locator('#luxpedia-edit-lease').waitFor();
+    const probe = '/rest/wikis/xwiki/spaces/Drafts/spaces/NewArticle/pages/WebHome/attachments/probe.png';
+    assert.equal(await wiki.page.evaluate(async url => (await fetch(url, { method: 'POST', body: 'file' })).status, probe), 200);
+    assert.equal(await wiki.page.evaluate(url => new Promise(resolve => {
+      const request = new XMLHttpRequest(); request.open('POST', url); request.onload = () => resolve(request.status); request.send('file');
+    }), probe), 200);
+    assert.deepEqual(wiki.state.savedHeaders, ['lease-fixture', 'lease-fixture']);
+    wiki.state.leaseGeneration = 'new-owner-generation';
+    assert.equal(await wiki.page.evaluate(async url => (await fetch(url, { method: 'POST', body: 'old file' })).status, probe), 403);
+    assert.equal(wiki.state.savedHeaders[2], 'lease-fixture');
+  } finally { await wiki.context.close(); }
+});
+
+test('an administrator can explicitly force release a busy draft without creating a second draft', async () => {
+  const wiki = await wikiFixture({ status: 'draft', linkedTarget: 'Knowledge.Article', leaseStatus: 'busy', admin: true });
+  try {
+    await wiki.page.goto(wiki.origin + '/bin/view/Drafts/NewArticle/WebHome');
+    await wiki.page.locator('#luxpedia-force-release').click();
+    await wiki.page.locator('#luxpedia-claim-edit').waitFor();
+    assert.equal(wiki.state.leaseStatus, 'free');
+    assert.equal(wiki.state.leaseActions[0].operation, 'force-release');
+    assert.equal(wiki.state.actions.length, 0);
+    assert.equal(wiki.state.confirmations, 1);
   } finally { await wiki.context.close(); }
 });

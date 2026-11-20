@@ -1,2 +1,3 @@
 org.luxpedia.workflow.WorkflowPolicyListener
 org.luxpedia.workflow.WorkflowPolicyScriptService
+org.luxpedia.workflow.DepartmentAuthorizationSettler
