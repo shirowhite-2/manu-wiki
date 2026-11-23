@@ -58,7 +58,7 @@ async function fixture(options={}) {
    else if(op==='categories'){result={items:[{reference:'Knowledge.WebHome',title:'Knowledge'},{reference:'Knowledge.Technical.WebHome',title:'Technical'}]};}
    else if(op==='pages'||op==='trash'){const items=op==='pages'?state.pages:state.trash;result={items:clone(items),total:items.length,page:1,pages:1};}
    else {result={roles:{all:12,managers:1,editors:7,reviewers:2,readers:8,unassigned:0},activity:{available:true,days:30,edits:25,users:5,leaders:[{user:'XWiki.editor',count:7}]},
-    runtime:{wiki:'17.10.15',policy:'luxpedia-workflow-policy-15',java:'17',uptime:60000,heapUsed:1000000,heapMax:10000000,diskTotal:100000000,diskFree:20000000,checks:[{name:'database',state:'ok'},{name:'containers',state:'unavailable'},{name:'backup',state:'unavailable'}]}};}
+    runtime:{wiki:'17.10.15',policy:'luxpedia-workflow-policy-16',java:'17',uptime:60000,heapUsed:1000000,heapMax:10000000,diskTotal:100000000,diskFree:20000000,checks:[{name:'database',state:'ok'},{name:'containers',state:'unavailable'},{name:'backup',state:'unavailable'}]}};}
    return route.fulfill({json:{status:'ok',token:'test-token',...result}});
   }
   const operations=options.section==='operations',navigation=options.section==='navigation';

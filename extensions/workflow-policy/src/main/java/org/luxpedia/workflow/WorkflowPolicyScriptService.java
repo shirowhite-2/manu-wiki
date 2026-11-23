@@ -121,6 +121,7 @@ public class WorkflowPolicyScriptService implements ScriptService
                 }
                 case "settings" -> new NavigationSettings(policy, context).read();
                 case "categories" -> java.util.Map.of("status", "ok", "items", new NavigationSettings(policy, context).categories());
+                case "rag-overview" -> new RagSync(policy, context).overview();
                 default -> admin.dashboard(days);
             };
             var response = new java.util.LinkedHashMap<>(result); response.put("token", csrf.getToken()); return response;
@@ -144,10 +145,20 @@ public class WorkflowPolicyScriptService implements ScriptService
                     yield operation.equals("save-department") ? departments.saveDepartment(input) : departments.saveSettings(input);
                 }
                 case "save-settings" -> new NavigationSettings(policy, context).save(payload);
+                case "rag-save-settings" -> rag(() -> new RagSettings(policy, context).save(payload, new RagSync(policy, context).categoryReferences()));
+                case "rag-test" -> rag(() -> new RagSync(policy, context).test(payload));
+                case "rag-preview" -> rag(() -> new RagSync(policy, context).preview());
+                case "rag-run" -> rag(() -> new RagSync(policy, context).start(payload));
+                case "rag-continue" -> rag(() -> new RagSync(policy, context).resume(payload));
                 default -> java.util.Map.of("status", "invalid_operation");
             };
         } catch (SecurityException conflict) { return java.util.Map.of("status", "conflict"); }
         catch (Exception error) { return java.util.Map.of("status", "unavailable"); }
+    }
+    /** Sync refusals carry a fixed server-side reason (for example an unconfigured address) back to the administrator. */
+    static java.util.Map<String, Object> rag(java.util.concurrent.Callable<java.util.Map<String, Object>> operation) throws Exception {
+        try { return operation.call(); }
+        catch (SecurityException refused) { return java.util.Map.of("status", "refused", "reason", String.valueOf(refused.getMessage())); }
     }
     public java.util.Map<String, Object> presentation(String name) {
         try { return new NavigationSettings((WorkflowPolicyListener) listener, context()).presentation(name); }

@@ -553,6 +553,50 @@ WORKFLOW_UX_JS = r"""(function () {
     setTimeout(function () { waitForDoneButton(reference, isAdmin, attempts + 1); }, 500);
   }
 
+  function categoryKey(value) {
+    return (value || '').replace(/^xwiki:/, '').replace(/^document:/, '').replace(/^[^:]+:/, '')
+      .replace(/\.WebHome$/, '').replace(/^Knowledge\./, '');
+  }
+
+  function restrictPublicationLocation(attempts) {
+    if (attempts >= 20) { return; }
+    var input = document.querySelector('form[action*="PublicationWorkflow/Script"] input[name="targetSpace"]');
+    if (!input) { setTimeout(function () { restrictPublicationLocation(attempts + 1); }, 300); return; }
+    if (input.dataset.luxpediaVisibleCategories === '1') { return; }
+    input.dataset.luxpediaVisibleCategories = '1';
+    categoryOptions().then(function (options) {
+      var keys = (Array.isArray(options) ? options : []).map(function (entry) { return entry.key; });
+      function allowed(value) {
+        var key = categoryKey(value);
+        return !!key && keys.indexOf(key) !== -1;
+      }
+      var picker = input.closest('.location-picker') || input.form;
+      var tree = picker && picker.querySelector('[data-url*="DocumentTree"]');
+      if (tree && tree.getAttribute('data-url').indexOf('root=') === -1) {
+        tree.setAttribute('data-url', tree.getAttribute('data-url') + '&root=' + encodeURIComponent('document:xwiki:Knowledge.WebHome'));
+      }
+      if (input.form) {
+        input.form.addEventListener('submit', function (event) {
+          if (allowed(input.value)) { return; }
+          event.preventDefault();
+          event.stopPropagation();
+          input.focus();
+        }, true);
+      }
+      if (!tree || typeof window.require !== 'function') { return; }
+      window.require(['jquery'], function ($) {
+        $(tree).on('load_node.jstree', function (event, data) {
+          (data.node.children || []).slice().forEach(function (id) {
+            var node = data.instance.get_node(id);
+            var key = categoryKey(node && node.id);
+            var keep = keys.some(function (item) { return item === key || item.indexOf(key + '.') === 0; });
+            if (!keep) { data.instance.delete_node(node); }
+          });
+        });
+      });
+    });
+  }
+
   function installCategorySelector(reference, isAdmin, attempts) {
     if (isAdmin || reference === 'Drafts.WebHome' || attempts >= 30 || !location.pathname.match(/^\/bin\/edit\/Drafts(?:\/|$)/) ||
         document.getElementById('luxpedia-category-choice') || document.querySelector('select[data-luxpedia-publication-category]')) { return; }
@@ -659,6 +703,7 @@ WORKFLOW_UX_JS = r"""(function () {
       var isAdmin = roles.admin;
       waitForDoneButton(reference, isAdmin, 0);
       installCategorySelector(reference, isAdmin, 0);
+      if (!isAdmin) { restrictPublicationLocation(0); }
       if (location.pathname.indexOf('/bin/view/') === 0) {
         continuePendingSubmission(reference);
         // Drafts use category-derived targets; published pages start as targets,

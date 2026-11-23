@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import apply_sprint1 as sprint
 
-POLICY = "luxpedia-workflow-policy-15"
+POLICY = "luxpedia-workflow-policy-16"
 ENDPOINT = "/bin/get/LuxPedia/Workflow/EditLock?outputSyntax=plain"
 TARGETS = [
     ("demo_bop_active", *(f"Knowledge.BOP-ACTIVE.EnglishDemoActive{i:02d}" for i in range(1, 6))),

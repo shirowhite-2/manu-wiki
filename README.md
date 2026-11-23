@@ -34,7 +34,8 @@ python3 tests/sprint1_smoke.py
 
 ## 交付与记录
 
-- [网站角色与部门分类权限、策略 15 升级](docs/department-roles.md)
+- [网站角色与部门分类权限、策略 16 升级](docs/department-roles.md)
+- [LightRAG 手动同步：分类工作区、纯文本与平台隔离](docs/rag-sync.md)
 - [原生管理员界面、批量恢复、导航与最新升级命令](docs/admin-tools.md)
 - [当前角色、百科/编写区流程与部署](docs/roles-and-interface.md)
 - [页面浏览器、正文组件与 Excel/CSV 导出](docs/content-tools.md)

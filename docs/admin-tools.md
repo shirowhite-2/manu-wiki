@@ -1,15 +1,15 @@
 # 现有管理员界面：管理工具与导航配置
 
-> 当前分支增加管理员删除修复、BOP 分类页草稿限制及分类首页迁移，策略 15 需要完整重建 JAR 和镜像。
+> 当前分支增加 [LightRAG 手动同步](rag-sync.md) 管理分区，策略 16 需要完整重建 JAR 和镜像。
 
 
-这次扩展现有 **Wiki 管理 → 内容**，新增“管理工具 / Administration tools”和“导航配置 / Navigation settings”两个原生管理分区。管理员首页 `XWiki.WebHome` 和现有管理员导航也提供入口。沿用 Flamingo/LuxPedia 主题，当前界面固定为 English，不另建管理应用。
+这次扩展现有 **Wiki 管理 → 内容**，新增“管理工具 / Administration tools”和“导航配置 / Navigation settings”两个原生管理分区；策略 16 另加“LightRAG 同步 / LightRAG sync”。管理员首页 `XWiki.WebHome` 和现有管理员导航也提供入口。沿用 Flamingo/LuxPedia 主题，当前界面固定为 English，不另建管理应用。
 
 只有拥有本 Wiki `admin` 权限的账号能读取管理数据或执行管理操作。角色计数使用当前 Wiki 用户组，用户、用户组和权限配置继续链接到原生管理器；没有建立第二套账号系统，后续可接若依。
 
 ## 现有 Mac 实例升级（8081）
 
-当前分支需要 **`luxpedia-workflow-policy-15`**；即使已经安装策略 14，也要重新构建 JAR 和镜像。先按原有流程备份数据库和 XWiki 数据卷，保留原项目目录、`.env`、`.secrets`、Compose 项目名和数据卷。在项目目录依次执行：
+当前分支需要 **`luxpedia-workflow-policy-16`**；即使已经安装策略 15，也要重新构建 JAR 和镜像。先按原有流程备份数据库和 XWiki 数据卷，保留原项目目录、`.env`、`.secrets`、Compose 项目名和数据卷。在项目目录依次执行：
 
 ```bash
 git switch feat/article-translation &&
@@ -29,6 +29,7 @@ NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
 
 - 管理工具：`http://127.0.0.1:8081/bin/admin/XWiki/XWikiPreferences?section=LuxPediaOperations`
 - 导航配置：`http://127.0.0.1:8081/bin/admin/XWiki/XWikiPreferences?section=LuxPediaNavigation`
+- LightRAG 同步：`http://127.0.0.1:8081/bin/admin/XWiki/XWikiPreferences?section=LuxPediaRag`
 - 管理员首页：`http://127.0.0.1:8081/bin/view/XWiki/`
 
 日后普通重启只需 `docker compose -f compose.yaml -f compose.workflow-policy.yaml up -d`；升级代码才需要完整步骤。

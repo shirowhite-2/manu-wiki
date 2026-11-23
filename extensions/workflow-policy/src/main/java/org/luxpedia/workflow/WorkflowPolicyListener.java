@@ -496,7 +496,7 @@ public class WorkflowPolicyListener implements EventListener
     }
     public String getPolicyVersion() {
         if (!DraftWriteBoundary.present()) { return "POLICY_WRITE_BOUNDARY_MISSING"; }
-        return DepartmentAuthorizationSettler.active ? "luxpedia-workflow-policy-15" : "POLICY_DEPARTMENTS_MISSING";
+        return DepartmentAuthorizationSettler.active ? "luxpedia-workflow-policy-16" : "POLICY_DEPARTMENTS_MISSING";
     }
     /** Deployment migration: remove historical validator EDIT grants without re-authoring content. */
     public int repairExistingDraftRights(XWikiContext context) throws Exception {

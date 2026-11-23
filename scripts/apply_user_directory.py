@@ -10,6 +10,7 @@ ADMIN_NAVIGATION = """## LUXPEDIA_ADMIN_DIRECTORY_START
 ** [[$services.localization.render('luxpedia.adminTools')>>XWiki.XWikiPreferences||queryString='section=LuxPediaOperations' action='admin']]
 ** [[$services.localization.render('luxpedia.departmentRoles')>>XWiki.XWikiPreferences||queryString='editor=globaladmin&section=LuxPediaDepartments' action='admin']]
 ** [[$services.localization.render('luxpedia.navigationSettings')>>XWiki.XWikiPreferences||queryString='section=LuxPediaNavigation' action='admin']]
+** [[$services.localization.render('luxpedia.ragSync')>>XWiki.XWikiPreferences||queryString='section=LuxPediaRag' action='admin']]
 ** [[$services.localization.render('luxpedia.templateCenter')>>LuxPedia.Templates.WebHome]]
 ** [[$services.localization.render('luxpedia.users')>>XWiki.Users.WebHome]]
 ** [[$services.localization.render('luxpedia.role.managers')>>XWiki.Users.Managers.WebHome]]

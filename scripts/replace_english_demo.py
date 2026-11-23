@@ -20,7 +20,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import apply_sprint1 as sprint
 import wiki_admin
 
-POLICY = "luxpedia-workflow-policy-15"
+POLICY = "luxpedia-workflow-policy-16"
 ADMIN_TOOLS = "/bin/get/LuxPedia/Workflow/AdminTools?outputSyntax=plain"
 CONFIRMATION = "RESET-AND-SEED-ENGLISH"
 DEMO_PREFIX = "EnglishDemo"

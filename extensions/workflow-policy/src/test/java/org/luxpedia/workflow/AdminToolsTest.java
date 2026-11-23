@@ -395,6 +395,16 @@ class AdminToolsTest {
         store.get(departmentPolicy().settingsReference("xwiki")).getObject(DepartmentPolicy.SETTINGS_CLASS).setStringValue("payload", "invalid-json");
         assertEquals(RuleState.DENY, cached.getAccess().get(Right.VIEW));
     }
+    @Test void editorsCanCreateADraftBeforeItHasACategory() throws Exception {
+        departmentSettings(true, List.of());
+        var access = departmentAccess("Drafts.BrandNew.WebHome", List.of(), false, Set.of());
+        assertEquals(RuleState.ALLOW, access.getAccess().get(Right.EDIT));
+        assertEquals(RuleState.ALLOW, access.getAccess().get(Right.VIEW));
+        var saved = document("Drafts.BrandNew.WebHome", false, new HashMap<>());
+        when(saved.getCreatorReference()).thenReturn(ref("XWiki.anotherEditor"));
+        store.put(saved.getDocumentReference(), saved);
+        assertEquals(RuleState.DENY, access.getAccess().get(Right.VIEW));
+    }
     @Test void linkedDraftsUseTheKnowledgeTargetAndUnassignedDraftsStayWithTheirOwner() throws Exception {
         departmentSettings(true, List.of());
         var group = departmentGroup("a".repeat(32), List.of("Knowledge.Engineering.WebHome"), List.of("XWiki.Admin"));

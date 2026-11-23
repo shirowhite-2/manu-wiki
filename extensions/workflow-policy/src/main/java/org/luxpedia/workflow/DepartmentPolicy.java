@@ -58,7 +58,10 @@ final class DepartmentPolicy {
         if (ref.getSpaceReferences().size() == 1 && PORTALS.contains(ref.getName())) { return true; }
         DocumentReference target = ref;
         if (area.equals("Drafts")) {
-            var doc = context.getWiki().getDocument(ref, context); var flow = doc.getObject(WorkflowPolicyListener.WF);
+            var doc = context.getWiki().getDocument(ref, context);
+            // Create checks the page before it exists. A missing draft has no owner yet, so the owner rule would deny every editor.
+            if (doc.isNew()) { return true; }
+            var flow = doc.getObject(WorkflowPolicyListener.WF);
             String selected = flow == null ? "" : flow.getStringValue("target");
             if (selected.isBlank()) {
                 var metadata = doc.getObject("LuxPedia.Code.ArticleClass");
