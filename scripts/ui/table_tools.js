@@ -2,6 +2,14 @@
   'use strict';
   if (window.LuxPediaTables) { return; }
   var t = window.LuxPediaI18n.t, instances = [], sequence = 0;
+  function currentSpace() {
+    var reference = document.documentElement.getAttribute('data-xwiki-reference');
+    var meta = document.querySelector('meta[name="document"]');
+    if (!reference && meta) { reference = meta.content; }
+    if (reference) { return reference.replace(/^xwiki:/, '').split('.')[0]; }
+    var match = location.pathname.match(/^\/bin\/view\/([^/]+)/);
+    return match ? decodeURIComponent(match[1]) : '';
+  }
   function label(tag, key) {
     var node = document.createElement(tag); node.dataset.luxpediaI18n = key; node.textContent = t(key); return node;
   }
@@ -197,6 +205,10 @@
   }
   function boot() {
     if (!/\/bin\/view\//.test(location.pathname)) { return; }
+    // User profile pages contain XWiki-owned tables and the Activity Stream.
+    // They are application UI, not article-body tables; wrapping them breaks
+    // the profile layout and duplicates search/sort/paging controls.
+    if (currentSpace() === 'XWiki') { return; }
     var content = document.getElementById('xwikicontent'); if (!content) { return; }
     content.querySelectorAll('table').forEach(enhance);
   }

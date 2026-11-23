@@ -184,14 +184,14 @@ test('refresh and native upload completion discover new attachments without losi
   } finally { await f.close(); }
 });
 
-test('Chinese controls preserve filenames, selection and unsaved text when switching language', async () => {
+test('English-only controls preserve filenames, selection and unsaved text', async () => {
   const f = await fixture({ language: 'zh' });
   try {
     await f.ready();
     await f.page.selectOption('#luxpedia-attachment-filter', 'files');
     await f.page.selectOption('#luxpedia-attachment-select', 'Data.xlsx');
     await f.page.locator('#article').fill('未保存正文');
-    await f.page.selectOption('#luxpedia-language-select', 'en');
+    assert.equal(await f.page.locator('#luxpedia-language-select').count(), 0);
     assert.equal(await f.page.locator('#luxpedia-attachment-select').inputValue(), 'Data.xlsx');
     assert.equal(await f.page.locator('#article').innerText(), '未保存正文');
     assert.equal(await f.page.getByRole('button', { name: 'Refresh attachments' }).count(), 1);

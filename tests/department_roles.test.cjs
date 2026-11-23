@@ -38,13 +38,13 @@ async function fixture(options={}){
 }
 async function newDepartment(f){await f.page.getByRole('button',{name:'Create department role',exact:true}).click();await f.page.locator('#luxpedia-department-editor input[aria-label="XWiki.alice"]').waitFor();return f.page.locator('#luxpedia-department-editor');}
 
-test('native anonymous view/edit switches get distinct bilingual labels without changing inputs or autosave listeners',async()=>{
- const f=await fixture({rights:true});try{
-  assert.equal(await f.page.getByRole('checkbox',{name:'Require login to view pages, regardless of page permissions.'}).isChecked(),true);
-  assert.equal(await f.page.getByRole('checkbox',{name:'Require login to edit pages, regardless of page permissions.'}).isChecked(),false);
-  await f.page.selectOption('#luxpedia-language-select','zh');
-  await f.page.getByRole('checkbox',{name:'强制登录后才能编辑页面（不受页面权限设置影响）。'}).check();
-  assert.equal(await f.page.getByRole('checkbox',{name:'强制登录后才能查看页面（不受页面权限设置影响）。'}).isChecked(),true);
+test('native anonymous view/edit switches use English labels without changing inputs or autosave listeners',async()=>{
+  const f=await fixture({rights:true});try{
+   assert.equal(await f.page.getByRole('checkbox',{name:'Require login to view pages, regardless of page permissions.'}).isChecked(),true);
+   assert.equal(await f.page.getByRole('checkbox',{name:'Require login to edit pages, regardless of page permissions.'}).isChecked(),false);
+   assert.equal(await f.page.locator('#luxpedia-language-select').count(),0);
+   await f.page.getByRole('checkbox',{name:'Require login to edit pages, regardless of page permissions.'}).check();
+   assert.equal(await f.page.getByRole('checkbox',{name:'Require login to view pages, regardless of page permissions.'}).isChecked(),true);
   assert.deepEqual(await f.page.evaluate(()=>({same:originalView===document.getElementById('authenticate_view')&&originalEdit===document.getElementById('authenticate_edit'),events:nativeEvents})),{same:true,events:[['authenticate_edit',true]]});
  }finally{await f.close();}
 });
@@ -59,8 +59,8 @@ test('creating a bilingual department preserves member selections across pages a
 test('public categories and enablement require a separate explicit versioned save',async()=>{
  const f=await fixture();try{await f.page.getByRole('checkbox',{name:'Enable department category restrictions'}).check();await f.page.locator('input[value="Knowledge.Engineering.WebHome"]').check();assert.equal(f.state.writes.length,0);await f.page.getByRole('button',{name:'Save access rules',exact:true}).click();await f.page.waitForFunction(()=>document.querySelector('#luxpedia-department-roles [role="status"]').textContent==='Category access rules saved.');assert.deepEqual(f.state.settings,{enabled:true,publicCategories:['Knowledge.Engineering.WebHome']});assert.equal(JSON.parse(f.state.writes[0].payload).version,'1.1');}finally{await f.close();}
 });
-test('language changes preserve unfinished department fields, checked categories and member selection',async()=>{
- const f=await fixture();try{const editor=await newDepartment(f);await editor.getByRole('textbox',{name:'English department name'}).fill('Unfinished');await editor.locator('input[value="Knowledge.Engineering.WebHome"]').check();await editor.getByRole('checkbox',{name:'XWiki.alice',exact:true}).check();const url=f.page.url();await f.page.selectOption('#luxpedia-language-select','zh');assert.equal(f.page.url(),url);assert.equal(await editor.getByRole('textbox',{name:'部门英文名'}).inputValue(),'Unfinished');assert.equal(await editor.locator('input[value="Knowledge.Engineering.WebHome"]').isChecked(),true);assert.equal(await editor.getByRole('checkbox',{name:'XWiki.alice',exact:true}).isChecked(),true);assert.match(await editor.innerText(),/编辑者/);assert.equal(f.state.writes.length,0);}finally{await f.close();}
+test('English-only department form preserves unfinished fields and selections',async()=>{
+ const f=await fixture();try{const editor=await newDepartment(f);await editor.getByRole('textbox',{name:'English department name'}).fill('Unfinished');await editor.locator('input[value="Knowledge.Engineering.WebHome"]').check();await editor.getByRole('checkbox',{name:'XWiki.alice',exact:true}).check();assert.equal(await f.page.locator('#luxpedia-language-select').count(),0);assert.equal(await editor.getByRole('textbox',{name:'English department name'}).inputValue(),'Unfinished');assert.equal(await editor.locator('input[value="Knowledge.Engineering.WebHome"]').isChecked(),true);assert.equal(await editor.getByRole('checkbox',{name:'XWiki.alice',exact:true}).isChecked(),true);assert.match(await editor.innerText(),/Editors/);assert.equal(f.state.writes.length,0);}finally{await f.close();}
 });
 test('a conflicting department save retains unfinished inputs and does not overwrite server state',async()=>{
  const f=await fixture({conflict:true});try{const editor=await newDepartment(f);await editor.getByRole('textbox',{name:'English department name'}).fill('Keep me');await editor.getByRole('button',{name:'Save department role',exact:true}).click();await f.page.waitForFunction(()=>document.querySelector('#luxpedia-department-roles [role="status"]').textContent.includes('Reload before saving'));assert.equal(await editor.getByRole('textbox',{name:'English department name'}).inputValue(),'Keep me');assert.deepEqual(f.state.departments,[]);}finally{await f.close();}

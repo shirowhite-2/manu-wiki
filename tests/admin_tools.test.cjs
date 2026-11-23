@@ -58,7 +58,7 @@ async function fixture(options={}) {
    else if(op==='categories'){result={items:[{reference:'Knowledge.WebHome',title:'Knowledge'},{reference:'Knowledge.Technical.WebHome',title:'Technical'}]};}
    else if(op==='pages'||op==='trash'){const items=op==='pages'?state.pages:state.trash;result={items:clone(items),total:items.length,page:1,pages:1};}
    else {result={roles:{all:12,managers:1,editors:7,reviewers:2,readers:8,unassigned:0},activity:{available:true,days:30,edits:25,users:5,leaders:[{user:'XWiki.editor',count:7}]},
-    runtime:{wiki:'17.10.15',policy:'luxpedia-workflow-policy-13',java:'17',uptime:60000,heapUsed:1000000,heapMax:10000000,diskTotal:100000000,diskFree:20000000,checks:[{name:'database',state:'ok'},{name:'containers',state:'unavailable'},{name:'backup',state:'unavailable'}]}};}
+    runtime:{wiki:'17.10.15',policy:'luxpedia-workflow-policy-15',java:'17',uptime:60000,heapUsed:1000000,heapMax:10000000,diskTotal:100000000,diskFree:20000000,checks:[{name:'database',state:'ok'},{name:'containers',state:'unavailable'},{name:'backup',state:'unavailable'}]}};}
    return route.fulfill({json:{status:'ok',token:'test-token',...result}});
   }
   const operations=options.section==='operations',navigation=options.section==='navigation';
@@ -153,13 +153,14 @@ test('navigation GUI adds a bilingual nested menu and category banner without wr
  }finally{await f.close();}
 });
 
-test('admin language switching retains unfinished menu fields and the native admin URL',async()=>{
+test('English-only admin menu settings retain unfinished fields and the native admin URL',async()=>{
  const f=await fixture({section:'navigation'});
  try{
   await f.page.getByRole('button',{name:'Add menu entry',exact:true}).click();await f.page.locator('#luxpedia-menu-form [data-admin-field="navLabelEn"]').fill('Unsaved menu');
-  const before=f.page.url();await f.page.locator('#luxpedia-language-select').selectOption('zh');
+  const before=f.page.url();
+  assert.equal(await f.page.locator('#luxpedia-language-select').count(),0);
   assert.equal(f.page.url(),before);assert.equal(await f.page.locator('#luxpedia-menu-form [data-admin-field="navLabelEn"]').inputValue(),'Unsaved menu');
-  assert.equal(await f.page.getByRole('button',{name:'保留本条修改',exact:true}).count(),1);
+  assert.equal(await f.page.getByRole('button',{name:'Keep this entry',exact:true}).count(),1);
   assert.equal(f.state.writes.length,0);
  }finally{await f.close();}
 });

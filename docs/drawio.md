@@ -21,7 +21,7 @@
 
 查看器在单独的 iframe 内运行，禁止接管 Wiki 顶层页面；不向外部页面发送 Wiki 的引荐地址，不将作者提供的脚本／插件／编辑器配置参数带入预览。Wiki 服务器不代理下载外部链接。分享链接中的图表内容对能阅读该文章的人可见；本功能不改变草稿、审核或正式文章权限。
 
-界面按钮与说明随 English / 中文切换；原作者的链接文本和图表正文保持原样。**收起图表** 可关闭页内展示。此功能提供链接和查看，不在 Wiki 内编辑或自动保存 draw.io 源文件。
+界面按钮与说明固定为 English；原作者的链接文本和图表正文保持原样。**Hide diagram** 可关闭页内展示。此功能提供链接和查看，不在 Wiki 内编辑或自动保存 draw.io 源文件。
 
 ## 部署
 
@@ -32,8 +32,8 @@ NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
 python3 scripts/apply_workflow.py --base-url http://127.0.0.1:8081 --apply
 ```
 
-安装器创建／更新 `LuxPedia.Code.DrawioScript` JavaScript 扩展，并同步中英文帮助。完成后强制刷新浏览器。
+安装器创建／更新 `LuxPedia.Code.DrawioScript` JavaScript 扩展，并同步 English 帮助。完成后强制刷新浏览器。
 
-回归使用本地浏览器夹具，并拦截外部查看器请求，验证插入、链接保留、按需加载、地址校验、私有链接降级、中英文、窄屏和动态正文更新。夹具不包含真实 XWiki 的富文本到 Wiki 转换，也不验证外网图表渲染。实际实例需使用 editor 创建含真实发布链接的草稿，保存预览、送审并发布后，由 reader 检查跳转、图表预览和移动端显示。
+回归使用本地浏览器夹具，并拦截外部查看器请求，验证插入、链接保留、按需加载、地址校验、私有链接降级、English-only 控件、窄屏和动态正文更新。夹具不包含真实 XWiki 的富文本到 Wiki 转换，也不验证外网图表渲染。实际实例需使用 editor 创建含真实发布链接的草稿，保存预览、送审并发布后，由 reader 检查跳转、图表预览和移动端显示。
 
 参考：[draw.io 发布链接说明](https://www.drawio.com/docs/manual/export/publish-link/)、[嵌入说明](https://www.drawio.com/docs/manual/export/embed-html/)。

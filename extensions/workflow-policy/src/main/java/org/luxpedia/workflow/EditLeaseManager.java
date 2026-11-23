@@ -102,6 +102,8 @@ class EditLeaseManager {
         WorkflowPolicyListener.require(!published.isNew() && published.getObject(WorkflowPolicyListener.WF) != null &&
             published.getObject(WorkflowPolicyListener.WF).getIntValue("istarget") == 1 &&
             WorkflowPolicyListener.status(published.getObject(WorkflowPolicyListener.WF)).equals("published"), "Register this Knowledge article with the workflow first.");
+        WorkflowPolicyListener.require(DraftWorkspace.admin(policy, context) || published.getObject(WorkflowPolicyListener.CATEGORY) == null,
+            "Editors cannot open category home pages as article drafts.");
         List<String> matches = policy.queries.createQuery("from doc.object(PublicationWorkflow.PublicationWorkflowClass) as wf " +
             "where wf.istarget = 0 and (wf.target = :local or wf.target = :full)", Query.XWQL)
             .setWiki(context.getWikiId()).bindValue("local", policy.localSerializer.serialize(target))

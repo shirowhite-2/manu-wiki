@@ -12,7 +12,7 @@ def apply(module, wiki):
         wiki.ensure_object_values('LuxPedia/Code', page, 'XWiki.XWikiRights', {
             'groups': 'XWiki.LuxManagers,XWiki.XWikiAdminGroup', 'levels': 'view', 'allow': '1'})
     wiki.ensure_object_values('LuxPedia/Code', 'DepartmentRoles', 'XWiki.ConfigurableClass', {
-        'displayInCategory': 'content', 'displayInSection': 'LuxPediaDepartments', 'scope': 'WIKI', 'sectionOrder': '125',
+        'displayInCategory': 'usersgroups', 'displayInSection': 'LuxPediaDepartments', 'scope': 'WIKI', 'sectionOrder': '350',
         'heading': '', 'configurationClass': '', 'propertiesToShow': '',
         'codeToExecute': '{{include reference="LuxPedia.Code.DepartmentRoles" context="new"/}}',
         'displayBeforeCategory': '', 'categoryIcon': 'users', 'iconAttachment': '', 'linkPrefix': ''})

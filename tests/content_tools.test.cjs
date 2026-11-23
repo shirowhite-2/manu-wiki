@@ -49,10 +49,12 @@ async function fixture(options = {}) {
       </script><script>${script}</script></body></html>`;
     return route.fulfill({ contentType: 'text/html', body: html });
   });
-  const url = 'http://wiki.test/bin/' + (options.editor ? 'edit/Drafts/Test/WebHome' : options.metadata ? 'view/LuxPedia/Help/PageBrowser' : 'view/Knowledge/Test/WebHome');
+  const route = options.editor ? 'edit/Drafts/Test/WebHome' : options.profile ? 'view/XWiki/Admin' :
+    options.metadata ? 'view/LuxPedia/Help/PageBrowser' : 'view/Knowledge/Test/WebHome';
+  const url = 'http://wiki.test/bin/' + route;
   await page.goto(url);
-  if (!options.editor) { await page.locator('.luxpedia-table-tools').first().waitFor(); }
-  else if (!options.readOnly) { await page.locator('#luxpedia-components-bar').waitFor(); }
+  if (!options.editor && !options.profile) { await page.locator('.luxpedia-table-tools').first().waitFor(); }
+  else if (options.editor && !options.readOnly) { await page.locator('#luxpedia-components-bar').waitFor(); }
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wiki-content-export-'));
   async function download(kind, scope = '.luxpedia-table-tools') {
     const waiting = page.waitForEvent('download'); await page.locator(scope + ' button[id$="-' + kind + '"]').click();
@@ -115,21 +117,31 @@ test('body table searches, sorts and paginates; Excel and CSV export all matchin
   } finally { await wiki.close(); }
 });
 
-test('metadata export preserves filters across pages and exports current-language headers', async () => {
+test('metadata export preserves filters across pages with English headers', async () => {
   const wiki = await fixture({ metadata: true });
   try {
     const p = wiki.page;
     await p.locator('select[id$="-browserOwner"]').selectOption('Alice');
     await p.locator('select[id$="-size"]').selectOption('10');
     assert.equal(inspectXlsx((await wiki.download('xlsx')).target).rows.length, 21);
-    await p.evaluate(() => { localStorage.setItem('luxpedia.interface.language','zh'); });
-    // Native language selection reloads view pages. Rendered headers are relocalized after navigation.
-    await p.locator('#luxpedia-language-select').selectOption('zh');
-    await p.waitForFunction(() => window.LuxPediaI18n.language() === 'zh');
+    assert.equal(await p.locator('#luxpedia-language-select').count(), 0);
+    assert.equal(await p.evaluate(() => window.LuxPediaI18n.language()), 'en');
     await p.locator('select[id$="-browserOwner"]').selectOption('Alice');
     const book = inspectXlsx((await wiki.download('xlsx')).target);
-    assert.equal(book.rows[0][0], '标题'); assert.equal(book.rows[0][3], '状态');
+    assert.equal(book.rows[0][0], 'Title'); assert.equal(book.rows[0][3], 'Status');
     assert.ok(book.rows.slice(1).every(row => row[2] === 'Alice'));
+  } finally { await wiki.close(); }
+});
+
+test('XWiki profile tables and activity stream are not wrapped as article tables', async () => {
+  const html = '<section class="profile-details">' + table(false).replaceAll('data-table', 'profile-table-one') +
+    '</section><section class="activity-stream">' + table(false).replaceAll('data-table', 'profile-table-two') + '</section>';
+  const wiki = await fixture({ profile: true, html });
+  try {
+    assert.equal(await wiki.page.locator('#xwikicontent table').count(), 2);
+    assert.equal(await wiki.page.locator('#xwikicontent .luxpedia-table-tools').count(), 0);
+    assert.equal(await wiki.page.locator('#profile-table-one').getAttribute('data-luxpedia-table-bound'), null);
+    assert.equal(await wiki.page.locator('#profile-table-two').getAttribute('data-luxpedia-table-bound'), null);
   } finally { await wiki.close(); }
 });
 
@@ -185,15 +197,13 @@ test('task components can toggle only the selected task and preserve editor chan
   } finally { await wiki.close(); }
 });
 
-test('switching editor language preserves unfinished component fields and article content', async () => {
+test('English-only editor preserves unfinished component fields and article content', async () => {
   const wiki = await fixture({ editor: true });
   try {
     const p = wiki.page; await openComponent(p, 'decision'); await p.locator('#luxpedia-component-decision').fill('Unfinished decision');
-    await p.evaluate(() => { localStorage.setItem('luxpedia.interface.language','zh'); });
-    // Trigger the same language action without moving focus out of the modal.
-    await p.locator('#luxpedia-language-select').evaluate(node => { node.value='zh';node.dispatchEvent(new Event('change',{bubbles:true})); });
+    assert.equal(await p.locator('#luxpedia-language-select').count(), 0);
     assert.equal(await p.locator('#luxpedia-component-decision').inputValue(), 'Unfinished decision');
-    assert.equal(await p.locator('#luxpedia-component-heading').textContent(), '决策概览');
+    assert.equal(await p.locator('#luxpedia-component-heading').textContent(), 'Decision overview');
     assert.equal(await p.locator('#editor-content').textContent(), 'Original article text.');
     await p.locator('#luxpedia-component-cancel').click(); assert.equal(await p.locator('#editor-content table').count(), 0);
   } finally { await wiki.close(); }

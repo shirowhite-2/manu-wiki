@@ -300,6 +300,37 @@ class WorkflowPolicyListenerTest {
         when(doc.getObject(WorkflowPolicyListener.WF).getStringValue("target")).thenReturn("Knowledge.Technical.WebHome");
         assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
     }
+    @Test void editorsCannotEditOrReviewAnExistingCategoryLandingDraft() throws Exception {
+        var category = document("Knowledge.BOP-ACTIVE.WebHome");
+        when(category.getObject(WorkflowPolicyListener.CATEGORY)).thenReturn(mock(BaseObject.class));
+        var previous = object("draft"); var current = object("draft");
+        when(previous.getStringValue("target")).thenReturn("Knowledge.BOP-ACTIVE.WebHome");
+        when(current.getStringValue("target")).thenReturn("Knowledge.BOP-ACTIVE.WebHome");
+        when(old.getObject(WorkflowPolicyListener.WF)).thenReturn(previous);
+        when(doc.getObject(WorkflowPolicyListener.WF)).thenReturn(current);
+
+        var error = assertThrows(SecurityException.class, () -> policy.check(doc, context, false));
+
+        assertTrue(error.getMessage().contains("Category home pages are administrator-managed"));
+    }
+    @Test void categoryLandingDraftRightsHideTheCopyFromEditorsAndReviewers() throws Exception {
+        var category = document("Knowledge.BOP-ACTIVE.WebHome");
+        when(category.getObject(WorkflowPolicyListener.CATEGORY)).thenReturn(mock(BaseObject.class));
+        var flow = object("draft"); when(flow.getStringValue("target")).thenReturn("Knowledge.BOP-ACTIVE.WebHome");
+        when(doc.getObject(WorkflowPolicyListener.WF)).thenReturn(flow);
+
+        policy.normalizeDraftRights(doc, "draft", context);
+
+        assertTrue(rights.stream().anyMatch(rule -> {
+            var calls = mockingDetails(rule).getInvocations();
+            return calls.stream().anyMatch(call -> call.getMethod().getName().equals("set") &&
+                call.getArgument(0).equals("groups") && call.getArgument(1).equals("XWiki.LuxEditors,XWiki.LuxReviewers")) &&
+                calls.stream().anyMatch(call -> call.getMethod().getName().equals("set") &&
+                    call.getArgument(0).equals("levels") && call.getArgument(1).equals("view,comment,edit,delete")) &&
+                calls.stream().anyMatch(call -> call.getMethod().getName().equals("set") &&
+                    call.getArgument(0).equals("allow") && call.getArgument(1).equals(0));
+        }));
+    }
     @Test void ordinaryWebHomeArticleDoesNotNeedArticleClassToSupportReviewedChanges() throws Exception {
         document("Knowledge.test.WebHome");
         assertTrue(policy.validTarget(ref("Knowledge.test.WebHome"), context));
@@ -323,13 +354,12 @@ class WorkflowPolicyListenerTest {
             document(name); assertFalse(policy.validTarget(ref(name), context), name);
         }
     }
-    @Test void knowledgeHomeIndexesAndCategoryContentCanUseLinkedDrafts() throws Exception {
+    @Test void knowledgeIndexesAndOrdinaryNestedPagesCanUseLinkedDrafts() throws Exception {
         for (String name : List.of("Knowledge.WebHome", "Knowledge.DocumentLibrary", "Knowledge.CategoryIndex", "Knowledge.Catalog.WebHome")) {
             policy.operation = "createDraftDocument"; states(null, "draft");
             when(old.isNew()).thenReturn(true);
             when(doc.getObject(WorkflowPolicyListener.WF).getStringValue("target")).thenReturn(name);
-            XWikiDocument article = document(name);
-            when(article.getObject("LuxPedia.Code.CategoryClass")).thenReturn(mock(BaseObject.class));
+            document(name);
             assertDoesNotThrow(() -> policy.check(doc, context, false), name);
         }
     }
@@ -442,6 +472,38 @@ class WorkflowPolicyListenerTest {
             }
         }
     }
+    @Test void administratorCanDeleteNestedDraftHomeFromBackgroundRefactoringJob() throws Exception {
+        doc = document("Drafts.BOP-ACTIVE.WebHome");
+        old = document("Drafts.BOP-ACTIVE.WebHome");
+        when(doc.getOriginalDocument()).thenReturn(old);
+        when(old.isNew()).thenReturn(false); when(old.getVersion()).thenReturn("2.1");
+        var latest = document("Drafts.BOP-ACTIVE.WebHome");
+        when(latest.isNew()).thenReturn(false); when(latest.getVersion()).thenReturn("3.1");
+        when(policy.authorization.hasAccess(eq(Right.ADMIN), eq(user), any())).thenReturn(true);
+
+        var event = new org.xwiki.bridge.event.DocumentDeletingEvent();
+        policy.onEvent(event, doc, context);
+        assertFalse(event.isCanceled(), "Async native deletion must not require a request write boundary or update baseline.");
+
+        try (var boundary = DraftWriteBoundary.open()) {
+            var serializedEvent = new org.xwiki.bridge.event.DocumentDeletingEvent();
+            policy.onEvent(serializedEvent, doc, context);
+            assertFalse(serializedEvent.isCanceled(), "A stale update baseline must not block an administrator's delete job.");
+        }
+    }
+    @Test void ordinaryUsersStillCannotDeleteWhenTheDraftWriteBoundaryIsAvailable() throws Exception {
+        doc = document("Drafts.BOP-ACTIVE.WebHome");
+        old = document("Drafts.BOP-ACTIVE.WebHome");
+        when(doc.getOriginalDocument()).thenReturn(old);
+        when(old.isNew()).thenReturn(false);
+        when(policy.authorization.hasAccess(eq(Right.ADMIN), any(), any())).thenReturn(false);
+
+        try (var boundary = DraftWriteBoundary.open()) {
+            var event = new org.xwiki.bridge.event.DocumentDeletingEvent();
+            policy.onEvent(event, doc, context);
+            assertTrue(event.isCanceled(), "The administrator delete exception must not grant ordinary delete rights.");
+        }
+    }
     @Test void everyDraftStateExplicitlyDeniesDeleteToEditorsAndReviewers() throws Exception {
         for (String state : List.of("draft", "validating", "valid", "published", "archived")) {
             rights.clear();
@@ -552,14 +614,15 @@ class WorkflowPolicyListenerTest {
     @Test void knowledgeRegistrationRequiresAdministrator() {
         assertThrows(SecurityException.class, () -> policy.registerExistingKnowledgeTargets(context));
     }
-    @Test void legacyRegistrationCoversRootAndNestedArticlesWithoutRewritingBodies() throws Exception {
+    @Test void legacyRegistrationCoversArticlesButSkipsCategoryLandingPages() throws Exception {
         when(policy.authorization.hasAccess(eq(Right.ADMIN), eq(user), any())).thenReturn(true);
         policy.resolver = realResolver();
         policy.localSerializer = mock(EntityReferenceSerializer.class);
         when(policy.localSerializer.serialize(any())).thenAnswer(call -> call.getArgument(0).toString().replace("xwiki:", ""));
         policy.queries = mock(QueryManager.class); Query query = mock(Query.class, RETURNS_SELF);
         when(policy.queries.createQuery(anyString(), eq(Query.XWQL))).thenReturn(query);
-        when(query.execute()).thenReturn(List.of("Knowledge.Article", "Knowledge.Category.Nested.Article", "Knowledge.test.WebHome", "Knowledge.CategoryAdmin"));
+        when(query.execute()).thenReturn(List.of("Knowledge.Article", "Knowledge.Category.Nested.Article", "Knowledge.test.WebHome",
+            "Knowledge.BOP-ACTIVE.WebHome", "Knowledge.CategoryAdmin"));
         for (String name : List.of("Knowledge.Article", "Knowledge.Category.Nested.Article", "Knowledge.test.WebHome")) {
             XWikiDocument original = document(name), registered = document(name);
             documents.put(ref(name), original); when(original.clone()).thenReturn(registered);
@@ -568,6 +631,8 @@ class WorkflowPolicyListenerTest {
         XWikiDocument root = documents.get(ref("Knowledge.Article"));
         XWikiDocument nested = documents.get(ref("Knowledge.Category.Nested.Article"));
         XWikiDocument plain = documents.get(ref("Knowledge.test.WebHome"));
+        XWikiDocument category = document("Knowledge.BOP-ACTIVE.WebHome");
+        when(category.getObject(WorkflowPolicyListener.CATEGORY)).thenReturn(mock(BaseObject.class));
         assertEquals(3, policy.registerExistingKnowledgeTargets(context));
         for (XWikiDocument original : List.of(root, nested, plain)) {
             XWikiDocument saved = original.clone();
@@ -575,6 +640,7 @@ class WorkflowPolicyListenerTest {
             verify(saved, never()).setContent(anyString());
             verify(wiki).saveDocument(saved, "Register existing article for reviewed changes", true, context);
         }
+        verify(wiki, never()).saveDocument(eq(category), eq("Register existing article for reviewed changes"), eq(true), eq(context));
     }
     @Test void historicalRightsRepairPreservesContentAuthor() throws Exception {
         when(policy.authorization.hasAccess(eq(Right.ADMIN), eq(user), any())).thenReturn(true);

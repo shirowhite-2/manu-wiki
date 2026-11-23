@@ -139,6 +139,24 @@ class AdminToolsTest {
         assertThrows(SecurityException.class, () -> operations.preview("delete", payload(List.of("Knowledge.Article"))));
         verify(wiki, never()).deleteAllDocuments(any(), anyBoolean(), any());
     }
+    @Test void categoryLandingPagesAreVisibleAsProtectedButCannotBeDeleted() throws Exception {
+        String categoryPage = "Drafts.BOP-ACTIVE.WebHome";
+        String articlePage = "Drafts.BOP-ACTIVE.ChildArticle";
+        store.put(ref(categoryPage), document(categoryPage, false,
+            new HashMap<>(Map.of("LuxPedia.Code.CategoryClass", object(Map.of())))));
+        store.put(ref(articlePage), document(articlePage, false, new HashMap<>()));
+        queries = statement -> List.of(categoryPage, articlePage);
+
+        Map<String, Object> result = operations.pages("", "Drafts", "1");
+        @SuppressWarnings("unchecked") List<Map<String, Object>> items = (List<Map<String, Object>>) result.get("items");
+        assertEquals(2, items.size());
+        assertEquals("protected", items.stream().filter(item -> item.get("reference").equals(categoryPage))
+            .findFirst().orElseThrow().get("state"));
+        assertEquals("ready", items.stream().filter(item -> item.get("reference").equals(articlePage))
+            .findFirst().orElseThrow().get("state"));
+        assertThrows(SecurityException.class, () -> operations.preview("delete", payload(List.of(categoryPage))));
+        verify(wiki, never()).deleteAllDocuments(any(), anyBoolean(), any());
+    }
     @Test void pendingLinkedDraftBlocksFormalPageRemoval() throws Exception {
         var flow = object(Map.of("status", "validating")); store.put(ref("Drafts.Article"), document("Drafts.Article", false, new HashMap<>(Map.of(WorkflowPolicyListener.WF, flow))));
         queries = statement -> statement.contains("wf.target =") ? List.of("Drafts.Article") : List.of();

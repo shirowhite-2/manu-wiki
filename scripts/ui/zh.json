@@ -91,6 +91,7 @@
   "categoryKey": "分类代号",
   "categoryName": "显示名称",
   "createCategory": "创建分类",
+  "templateAdminMenu": "模板管理",
   "categoryInvalid": "分类代号应为 1–40 位字母、数字或连字符，名称不能为空。",
   "categoryCreated": "分类已创建。",
   "categoryExists": "此分类代号已存在。",

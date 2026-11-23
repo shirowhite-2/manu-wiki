@@ -1,6 +1,6 @@
 # 个人收藏
 
-文章标题旁显示 **☆ 收藏 / ★ 已收藏**，点击可添加或取消，完成后立即显示结果。左侧导航的独立 **我的收藏** 区域展示最近添加的 5 篇可见文章，**查看全部收藏** 进入 `Favorites.WebHome`（`/bin/view/Favorites/`），可按标题、分类或路径搜索、分页和取消收藏。标题按钮和原下拉菜单共用同一状态。控件支持 English / 中文，并使用现有主题的按钮和排版。
+文章标题旁显示 **☆ Favorite / ★ Favorited**，点击可添加或取消，完成后立即显示结果。左侧导航的独立 **My Favorites** 区域展示最近添加的 5 篇可见文章，**View all favorites** 进入 `Favorites.WebHome`（`/bin/view/Favorites/`），可按标题、分类或路径搜索、分页和取消收藏。标题按钮和原下拉菜单共用同一状态。控件固定使用 English，并沿用现有主题的按钮和排版。
 
 Flamingo 的文章引用优先从 `<html data-xwiki-reference>` 读取，兼容旧 meta 标签和原生模型；读取与地址初始化在 DOM 就绪后进行。旧的 `LuxPedia.Favorites.WebHome` 中英文地址保留跳转，并从帮助中心导航树排除，避免形成第二套入口。原生 Favorites 技术树也排除，由独立收藏区域提供访问。
 

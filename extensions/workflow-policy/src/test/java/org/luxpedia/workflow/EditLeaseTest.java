@@ -103,6 +103,20 @@ class EditLeaseTest {
         assertEquals("busy", value.get("status")); assertEquals("", value.get("generation"));
         assertThrows(SecurityException.class, () -> EditLease.requireOwner(stored(), context));
     }
+    @Test void editorCannotOpenCategoryLandingAsAnArticleDraft() throws Exception {
+        var target = new DocumentReference("xwiki", List.of("Knowledge", "BOP-ACTIVE"), "WebHome");
+        var category = mock(XWikiDocument.class);
+        var workflow = object(Map.of("status", "published")); workflow.setIntValue("istarget", 1);
+        when(category.getObject(WorkflowPolicyListener.WF)).thenReturn(workflow);
+        when(category.getObject(WorkflowPolicyListener.CATEGORY)).thenReturn(mock(BaseObject.class));
+        when(category.isNew()).thenReturn(false);
+        store.put(target, category);
+
+        var error = assertThrows(SecurityException.class,
+            () -> manager.change("Knowledge.BOP-ACTIVE.WebHome", "open"));
+
+        assertTrue(error.getMessage().contains("category home pages"));
+    }
     @Test void takeoverKeepsSavedContentAndFencesTheOldEditorEvenAfterReacquisition() throws Exception {
         String first = manager.change("Drafts.Article.WebHome", "claim").get("generation").toString();
         when(request.getHeader("X-LuxPedia-Edit-Lease")).thenReturn(first);

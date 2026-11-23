@@ -91,6 +91,7 @@
   "categoryKey": "Category key",
   "categoryName": "Display name",
   "createCategory": "Create category",
+  "templateAdminMenu": "Templates",
   "categoryInvalid": "Use a 1–40 character key containing letters, numbers or hyphens, and a non-empty name.",
   "categoryCreated": "Category created.",
   "categoryExists": "This category key already exists.",

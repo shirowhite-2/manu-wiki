@@ -37,7 +37,9 @@ import com.xpn.xwiki.objects.ObjectDiff;
 @Singleton
 public class WorkflowPolicyListener implements EventListener
 {
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(WorkflowPolicyListener.class);
     static final String WF = "PublicationWorkflow.PublicationWorkflowClass";
+    static final String CATEGORY = "LuxPedia.Code.CategoryClass";
     static final String AUDIT = "LuxPedia.Code.ReviewAuditClass";
     static final String LEGACY_METADATA = legacyMetadata();
     private static final Set<String> SYSTEM_NAMES = Set.of("WebPreferences", "DocumentLibrary",
@@ -55,9 +57,13 @@ public class WorkflowPolicyListener implements EventListener
     @Override public void onEvent(Event event, Object source, Object data) {
         if (!(source instanceof XWikiDocument doc) || !(data instanceof XWikiContext context)) { return; }
         try {
-            if (EditLease.scope(doc) || doc.getDocumentReference().getSpaceReferences().get(0).getName().equals("Knowledge") ||
+            boolean deleting = event instanceof DocumentDeletingEvent;
+            // Native refactoring deletes run on a background job thread, outside the
+            // servlet filter's request-scoped write boundary. A delete also does not
+            // save this document, so update serialization/version guards don't apply.
+            if (!deleting && (EditLease.scope(doc) || doc.getDocumentReference().getSpaceReferences().get(0).getName().equals("Knowledge") ||
                 DepartmentPolicy.groupReference(doc.getDocumentReference()) || doc.getDocumentReference().equals(
-                    new DocumentReference(context.getWikiId(), List.of("LuxPedia", "Code"), "DepartmentSettings"))) {
+                    new DocumentReference(context.getWikiId(), List.of("LuxPedia", "Code"), "DepartmentSettings")))) {
                 DraftWriteBoundary.guard(doc.getDocumentReference().toString());
                 XWikiDocument latest = context.getWiki().getDocument(doc.getDocumentReference(), context);
                 if (nativeRestore() && DraftWorkspace.admin(this, context) && latest.isNew()) {
@@ -73,9 +79,13 @@ public class WorkflowPolicyListener implements EventListener
                     Objects.equals(latest.getVersion(), original.getVersion())),
                     "The draft changed while this request was waiting. Reload before saving.");
             }
-            check(doc, context, event instanceof DocumentDeletingEvent);
+            check(doc, context, deleting);
         } catch (Exception error) {
             // Throwing from a listener can be swallowed by ObservationManager. Cancel explicitly.
+            if (event instanceof DocumentDeletingEvent) {
+                LOG.warn("Canceling document deletion for {} by {}: {}", doc.getDocumentReference(),
+                    context.getUserReference(), error.getMessage(), error);
+            }
             ((CancelableEvent) event).cancel("LuxPedia: " + error.getMessage());
         }
     }
@@ -88,6 +98,9 @@ public class WorkflowPolicyListener implements EventListener
         XWikiDocument base = doc.getTranslation() == 0 ? doc : context.getWiki().getDocument(ref, context);
         BaseObject previous = doc.getTranslation() == 0 ? old.getObject(WF) : base.getObject(WF);
         BaseObject next = base.getObject(WF);
+        if (!deleting && space.equals("Drafts") && !DraftWorkspace.admin(this, context) && categoryDraft(doc, context)) {
+            require(false, "Category home pages are administrator-managed; editors can edit articles in the category instead.");
+        }
         if (DepartmentPolicy.groupReference(ref) || doc.getObject(DepartmentPolicy.CLASS) != null || old.getObject(DepartmentPolicy.CLASS) != null) {
             require(DraftWorkspace.admin(this, context), "Only administrators may manage department roles.");
         }
@@ -347,6 +360,22 @@ public class WorkflowPolicyListener implements EventListener
             !(root && ref.getName().equals("CategoryAdmin"));
     }
 
+    boolean categoryLanding(DocumentReference target, XWikiContext context) throws Exception {
+        if (!target.getWikiReference().getName().equals(context.getWikiId()) ||
+            !target.getSpaceReferences().get(0).getName().equals("Knowledge")) { return false; }
+        XWikiDocument page = context.getWiki().getDocument(target, context);
+        return !page.isNew() && page.getObject(CATEGORY) != null;
+    }
+
+    boolean categoryDraft(XWikiDocument draft, XWikiContext context) throws Exception {
+        if (draft.getObject(CATEGORY) != null) { return true; }
+        BaseObject workflow = draft.getObject(WF);
+        String targetName = workflow == null ? "" : Objects.toString(workflow.getStringValue("target"), "");
+        if (targetName.isBlank()) { return false; }
+        DocumentReference target = resolver.resolve(targetName, draft.getDocumentReference());
+        return categoryLanding(target, context);
+    }
+
     boolean protectedObjectChanged(XWikiDocument old, XWikiDocument doc, XWikiContext context) throws Exception {
         for (List<ObjectDiff> changes : doc.getObjectDiff(old, doc, context)) {
             for (ObjectDiff change : changes) {
@@ -382,19 +411,26 @@ public class WorkflowPolicyListener implements EventListener
     void normalizeDraftRights(XWikiDocument doc, String state, XWikiContext context) throws Exception {
         doc.removeObjects("XWiki.XWikiRights");
         boolean editable = (state.isEmpty() || state.equals("draft")) && !DraftWorkspace.abandoned(doc);
-        right(doc, "XWiki.LuxEditors", "view,comment", true, context);
-        if (editable && EditLease.active(doc)) {
+        boolean category = categoryDraft(doc, context);
+        if (category) {
+            // Category-home workflow copies are not editor/reviewer articles.
+            right(doc, "XWiki.LuxEditors,XWiki.LuxReviewers", "view,comment,edit,delete", false, context);
+        } else {
+            right(doc, "XWiki.LuxEditors", "view,comment", true, context);
+            right(doc, "XWiki.LuxReviewers", "view,comment", true, context);
+            // A page-level grant from upstream or creator rights must never expose deletion.
+            right(doc, "XWiki.LuxEditors,XWiki.LuxReviewers", "delete", false, context);
+        }
+        if (!category && editable && EditLease.active(doc)) {
             BaseObject holder = doc.newXObject(resolver.resolve("XWiki.XWikiRights", doc.getDocumentReference()), context);
             holder.set("users", EditLease.field(doc, "owner"), context);
             holder.set("levels", "edit", context); holder.set("allow", 1, context);
         }
-        right(doc, "XWiki.LuxReviewers", "view,comment", true, context);
-        // A page-level grant from upstream or creator rights must never expose deletion.
-        right(doc, "XWiki.LuxEditors,XWiki.LuxReviewers", "delete", false, context);
-        if (!editable || !EditLease.active(doc)) {
+        if (!category && (!editable || !EditLease.active(doc))) {
             right(doc, "XWiki.LuxEditors,XWiki.LuxReviewers", "edit", false, context);
         }
-        // No explicit edit DENY for reviewers: that would also block an editor who has both roles.
+        // Ordinary draft roles have no overlapping edit DENY; category copies above are
+        // explicitly hidden because their page body belongs to the administrator.
         right(doc, "XWiki.LuxReaders", "view,comment,edit,delete", false, context);
         BaseObject guest = doc.newXObject(resolver.resolve("XWiki.XWikiRights", doc.getDocumentReference()), context);
         guest.set("users", "XWiki.XWikiGuest", context);
@@ -460,7 +496,7 @@ public class WorkflowPolicyListener implements EventListener
     }
     public String getPolicyVersion() {
         if (!DraftWriteBoundary.present()) { return "POLICY_WRITE_BOUNDARY_MISSING"; }
-        return DepartmentAuthorizationSettler.active ? "luxpedia-workflow-policy-13" : "POLICY_DEPARTMENTS_MISSING";
+        return DepartmentAuthorizationSettler.active ? "luxpedia-workflow-policy-15" : "POLICY_DEPARTMENTS_MISSING";
     }
     /** Deployment migration: remove historical validator EDIT grants without re-authoring content. */
     public int repairExistingDraftRights(XWikiContext context) throws Exception {
@@ -512,7 +548,8 @@ public class WorkflowPolicyListener implements EventListener
             require(reference.getWikiReference().equals(wikiReference) &&
                 reference.getSpaceReferences().get(0).getName().equals("Knowledge"), "Knowledge migration scope exceeded.");
             XWikiDocument original = context.getWiki().getDocument(reference, context);
-            if (original.isNew() || original.getObject(WF) != null || !validTarget(reference, context)) { continue; }
+            if (original.isNew() || original.getObject(WF) != null || original.getObject(CATEGORY) != null ||
+                !validTarget(reference, context)) { continue; }
             XWikiDocument article = original.clone();
             registerPublishedTarget(article, context);
             article.setContentAuthorReference(original.getContentAuthorReference());

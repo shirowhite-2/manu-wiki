@@ -32,8 +32,9 @@ async function fixture(options = {}) {
   });
   const server = http.createServer((request, response) => {
     const editing = request.url.includes('/edit/');
+    const htmlLanguage = new URL(request.url, 'http://wiki.test').searchParams.get('xwikilanguage') || options.language || 'en';
     response.setHeader('Content-Type', 'text/html; charset=utf-8');
-    response.end(`<!doctype html><html lang="${options.language || 'en'}"><meta charset="utf-8">
+    response.end(`<!doctype html><html lang="${htmlLanguage}"><meta charset="utf-8">
       <title>Local draw.io fixture — production theme not loaded</title>
       <style>body{margin:12px}#xwikicontent{max-width:900px}a{overflow-wrap:anywhere}</style>
       <p>Local browser fixture; external viewer is stubbed.</p>
@@ -151,14 +152,15 @@ test('dynamic content refresh is idempotent and supports newly rendered links', 
   } finally { await f.close(); }
 });
 
-test('Chinese controls and responsive preview work on narrow screens', async () => {
+test('English controls and responsive preview work on narrow screens', async () => {
   const f = await fixture({ language: 'zh', viewport: { width: 375, height: 800 } });
   try {
-    await f.page.getByRole('button', { name: '预览图表' }).click();
-    const frame = f.page.getByTitle('draw.io 图表预览');
+    await f.page.getByRole('button', { name: 'Preview diagram' }).click();
+    const frame = f.page.getByTitle('draw.io diagram preview');
     assert.ok((await frame.boundingBox()).width <= 351);
-    assert.equal(new URL(await frame.getAttribute('src')).searchParams.get('lang'), 'zh');
-    assert.match(await f.page.locator('.luxpedia-drawio-preview').innerText(), /若加载受限或需要登录/);
+    assert.equal(new URL(await frame.getAttribute('src')).searchParams.get('lang'), 'en');
+    assert.match(await f.page.locator('.luxpedia-drawio-preview').innerText(), /If it is blocked or requires sign-in/);
+    assert.equal(await f.page.locator('#luxpedia-language-select').count(), 0);
   } finally { await f.close(); }
 });
 
@@ -204,17 +206,18 @@ test('read-only editors do not get insertion controls', async () => {
   } finally { await f.close(); }
 });
 
-test('changing editor language preserves the article and a partly entered diagram link', async () => {
+test('English-only editor preserves the article and a partly entered diagram link', async () => {
   const f = await fixture({ edit: true });
   try {
     await f.page.locator('#luxpedia-drawio-url').fill('not yet a valid link');
     await f.page.locator('#editor-content').fill('Unsaved article text');
     const before = f.page.url();
-    await f.page.locator('#luxpedia-language-select').selectOption('zh');
+    assert.equal(await f.page.locator('#luxpedia-language-select').count(), 0);
+    assert.equal(await f.page.evaluate(() => window.LuxPediaI18n.language()), 'en');
     assert.equal(f.page.url(), before);
     assert.equal(await f.page.locator('#editor-content').innerText(), 'Unsaved article text');
     assert.equal(await f.page.locator('#luxpedia-drawio-url').inputValue(), 'not yet a valid link');
-    assert.equal(await f.page.getByRole('button', { name: '插入链接', exact: true }).count(), 1);
+    assert.equal(await f.page.getByRole('button', { name: 'Insert link', exact: true }).count(), 1);
     assert.equal(await f.page.locator('#luxpedia-drawio-url').evaluate(input => input.checkValidity()), true);
     await f.page.locator('#luxpedia-drawio-url').fill(diagram);
     await f.page.locator('#luxpedia-drawio-url').press('Enter');

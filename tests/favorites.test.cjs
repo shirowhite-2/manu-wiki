@@ -230,16 +230,17 @@ test('conflicting versions refresh instead of overwriting changes made elsewhere
   } finally { await f.close(); }
 });
 
-test('Chinese controls work while editing without losing unsaved article content', async () => {
+test('English-only controls work while editing without losing unsaved article content', async () => {
   const f=await fixture({language:'zh',edit:true});
   try {
-    await f.page.getByRole('button',{name:'☆ 收藏',exact:true}).waitFor();
-    await f.page.locator('#user-body').fill('未保存的编辑内容'); const before=f.page.url();
-    await f.page.getByRole('button',{name:'☆ 收藏',exact:true}).click();
-    await f.page.getByText('已加入我的收藏。',{exact:true}).waitFor();
-    assert.equal(await f.page.getByRole('button',{name:'★ 已收藏',exact:true}).getAttribute('aria-pressed'),'true');
-    assert.equal(await f.page.locator('#user-body').innerText(),'未保存的编辑内容'); assert.equal(f.page.url(),before);
-    assert.equal(await f.page.getByRole('link',{name:'查看全部收藏'}).count(),1);
+    await f.page.getByRole('button',{name:'☆ Favorite',exact:true}).waitFor();
+    await f.page.locator('#user-body').fill('Unsaved article edit'); const before=f.page.url();
+    await f.page.getByRole('button',{name:'☆ Favorite',exact:true}).click();
+    await f.page.getByText('Added to your favorites.',{exact:true}).waitFor();
+    assert.equal(await f.page.getByRole('button',{name:'★ Favorited',exact:true}).getAttribute('aria-pressed'),'true');
+    assert.equal(await f.page.locator('#user-body').innerText(),'Unsaved article edit'); assert.equal(f.page.url(),before);
+    assert.equal(await f.page.getByRole('link',{name:'View all favorites'}).count(),1);
+    assert.equal(await f.page.locator('#luxpedia-language-select').count(),0);
   } finally { await f.close(); }
 });
 

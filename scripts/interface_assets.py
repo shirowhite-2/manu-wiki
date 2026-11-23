@@ -1,4 +1,4 @@
-"""Shared interface messages for generated XWiki JavaScript and translations."""
+"""Shared interface messages for English-only generated XWiki JavaScript."""
 import json
 from pathlib import Path
 
@@ -7,4 +7,4 @@ MESSAGES = {language: json.loads((UI / f"{language}.json").read_text()) for lang
 if MESSAGES["en"].keys() != MESSAGES["zh"].keys():
     raise ValueError("English and Chinese interface keys must match")
 I18N_JS = (UI / "interface.js").read_text().replace(
-    "__LUXPEDIA_MESSAGES__", json.dumps(MESSAGES, ensure_ascii=False))
+    "__LUXPEDIA_MESSAGES__", json.dumps({"en": MESSAGES["en"]}, ensure_ascii=False))

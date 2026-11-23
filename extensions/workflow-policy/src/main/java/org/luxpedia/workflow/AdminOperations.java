@@ -86,7 +86,7 @@ final class AdminOperations {
         for (String name : names) {
             DocumentReference ref;
             try { ref = reference(name); } catch (SecurityException ignored) { continue; }
-            XWikiDocument doc = context.getWiki().getDocument(ref, context); if (!eligible(doc)) { continue; }
+            XWikiDocument doc = context.getWiki().getDocument(ref, context); if (doc.isNew()) { continue; }
             if (visible >= start && rows.size() < 25) {
                 rows.add(Map.of("reference", policy.localSerializer.serialize(ref), "title", text(doc.getTitle()).isBlank() ? ref.getName() : doc.getTitle(),
                     "version", doc.getVersion(), "state", availability(doc), "url", context.getWiki().getURL(ref, "view", context)));

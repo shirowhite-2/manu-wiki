@@ -244,6 +244,9 @@ async function wikiFixture(options = {}) {
         if (pathname.endsWith('/properties/target')) { return json({ value: state.target }); }
         return json({ objectSummaries: state.status ? [{ number: 0 }] : [] });
       }
+      if (pathname.includes('/objects/LuxPedia.Code.CategoryClass')) {
+        return json({ objectSummaries: options.categoryLanding ? [{ number: 0 }] : [] });
+      }
       if (pathname.endsWith('/objects') && request.method() === 'POST') {
         const fields = new URLSearchParams(request.postData());
         state.hasArticle = true;
@@ -362,7 +365,7 @@ for (const value of ['Operations', '操作手册', 'Knowledge.Operations.WebHome
   });
 }
 
-test('native property node, selection, options and event bindings survive language changes', async () => {
+test('native property node, selection and event bindings survive in English-only mode', async () => {
   const wiki = await wikiFixture({ nativeCategory: {
     values: [['', 'Knowledge'], ['Operations', '操作手册'], ['Technical', '技术文档']], selected: 'Operations',
   } });
@@ -379,8 +382,9 @@ test('native property node, selection, options and event bindings survive langua
     await wiki.page.fill('#xwikieditor', 'Unsaved article');
     await wiki.chooseCategory('Technical');
     const url = wiki.page.url();
-    await wiki.page.selectOption('#luxpedia-language-select', 'zh');
     assert.equal(wiki.page.url(), url);
+    assert.equal(await wiki.page.locator('#luxpedia-language-select').count(), 0);
+    assert.equal(await wiki.page.evaluate(() => window.LuxPediaI18n.language()), 'en');
     assert.equal(await wiki.page.locator('#xwikieditor').inputValue(), 'Unsaved article');
     assert.equal(await native.inputValue(), 'Technical');
     assert.deepEqual(await native.locator('option').allTextContents(), ['Knowledge', '操作手册', '技术文档']);
@@ -500,16 +504,16 @@ test('selecting a nested category closes the native menu and submits to that exa
   } finally { await wiki.context.close(); }
 });
 
-test('language switching keeps the expanded tree and category without invoking a server tree job', async () => {
+test('English-only interface keeps the expanded tree and selected category', async () => {
   const wiki = await wikiFixture({ nestedCategories: true });
   try {
     await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
     await wiki.chooseCategory('Technical.Maintenance');
     await wiki.page.locator('#luxpedia-category-toggle').click();
-    await wiki.page.selectOption('#luxpedia-language-select', 'zh');
     assert.equal(await wiki.page.locator('#luxpedia-category-selected').textContent(), 'Maintenance');
-    assert.equal(await wiki.page.locator('#luxpedia-category-toggle').getAttribute('aria-label'), '浏览知识库分类');
-    assert.equal(await wiki.page.locator('#publication-category-root > .jstree-anchor').textContent(), '知识库');
+    assert.equal(await wiki.page.locator('#luxpedia-category-toggle').getAttribute('aria-label'), 'Browse Knowledge categories');
+    assert.equal(await wiki.page.locator('#publication-category-root > .jstree-anchor').textContent(), 'Knowledge');
+    assert.equal(await wiki.page.locator('#luxpedia-language-select').count(), 0);
     assert.equal(await wiki.page.locator('#luxpedia-publish-category').inputValue(), 'Technical.Maintenance');
     assert.deepEqual(wiki.state.errors, []);
     assert.deepEqual(wiki.state.actions, []);
@@ -603,10 +607,16 @@ test('administrator keeps the standard Done button', async () => {
 });
 
 for (const flamingo of [false, true]) {
-  test('admin gets a visible native template-creation shortcut and center link ' + JSON.stringify({ flamingo }), async () => {
+  test('admin template shortcuts are grouped in a compact dropdown ' + JSON.stringify({ flamingo }), async () => {
     const wiki = await wikiFixture({ admin: true, navbar: true, flamingo });
     try {
       await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
+      const toggle = wiki.page.locator('#luxpedia-template-admin-toggle');
+      await toggle.waitFor();
+      assert.equal(await toggle.textContent(), 'Templates ');
+      await toggle.click();
+      assert.equal(await toggle.getAttribute('aria-expanded'), 'true');
+      await wiki.page.locator('#luxpedia-template-admin-menu').waitFor();
       const create = wiki.page.locator('#luxpedia-create-article-template');
       await create.waitFor();
       assert.equal(await create.textContent(), 'Create article template');
@@ -618,10 +628,11 @@ for (const flamingo of [false, true]) {
       assert.equal(await wiki.page.locator('#luxpedia-open-template-center').getAttribute('href'), '/bin/view/LuxPedia/Templates/');
       await wiki.page.fill('#xwikieditor', 'Unsaved article');
       const current = wiki.page.url();
-      await wiki.page.selectOption('#luxpedia-language-select', 'zh');
+      assert.equal(await wiki.page.locator('#luxpedia-language-select').count(), 0);
       assert.equal(wiki.page.url(), current);
-      assert.equal(await create.textContent(), '创建文章模板');
-      assert.equal(await wiki.page.locator('#luxpedia-open-template-center').textContent(), '文章模板');
+      assert.equal(await toggle.textContent(), 'Templates ');
+      assert.equal(await create.textContent(), 'Create article template');
+      assert.equal(await wiki.page.locator('#luxpedia-open-template-center').textContent(), 'Article templates');
       assert.equal(await wiki.page.locator('#xwikieditor').inputValue(), 'Unsaved article');
       assert.equal(await wiki.page.locator('#original-menu').textContent(), 'Original menu');
       assert.equal(await wiki.page.locator('#luxpedia-template-admin').count(), 1);
@@ -638,7 +649,8 @@ for (const role of ['editor', 'reviewer', 'reader']) {
       const checked = wiki.page.waitForResponse(response => response.url().includes('/Workflow/CurrentRoles?'));
       await wiki.page.goto(wiki.origin + '/bin/view/Drafts/NewArticle/WebHome');
       await checked;
-      await wiki.page.waitForFunction(() => document.querySelector('#luxpedia-language-select'));
+      await wiki.page.waitForFunction(() => window.LuxPediaI18n?.language() === 'en');
+      assert.equal(await wiki.page.locator('#luxpedia-language-select').count(), 0);
       assert.equal(await wiki.page.locator('#luxpedia-template-admin').count(), 0);
       assert.deepEqual(wiki.state.errors, []);
     } finally { await wiki.context.close(); }
@@ -649,12 +661,14 @@ test('admin template shortcuts move into a delayed native navigation bar without
   const wiki = await wikiFixture({ admin: true });
   try {
     await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
-    await wiki.page.locator('#luxpedia-create-article-template').waitFor();
+    await wiki.page.locator('#luxpedia-template-admin-toggle').waitFor();
     await wiki.page.evaluate(() => {
       document.body.insertAdjacentHTML('afterbegin', '<header id="headerglobal"><nav id="menuview"><ul class="navbar-right"></ul></nav></header>');
     });
     await wiki.page.locator('#menuview .navbar-right > #luxpedia-template-admin').waitFor();
     assert.equal(await wiki.page.locator('#luxpedia-template-admin').count(), 1);
+    await wiki.page.locator('#luxpedia-template-admin-toggle').click();
+    await wiki.page.locator('#luxpedia-create-article-template').waitFor();
     assert.deepEqual(wiki.state.errors, []);
   } finally { await wiki.context.close(); }
 });
@@ -664,7 +678,8 @@ test('English is the default and the panel explains the review step', async () =
   try {
     await wiki.page.goto(wiki.origin + '/bin/view/Drafts/NewArticle/WebHome');
     await wiki.page.waitForFunction(() => document.querySelector('.luxpedia-state')?.textContent === 'Awaiting review');
-    assert.equal(await wiki.page.locator('#luxpedia-language-select').inputValue(), 'en');
+    assert.equal(await wiki.page.locator('#luxpedia-language-select').count(), 0);
+    assert.equal(await wiki.page.evaluate(() => window.LuxPediaI18n.language()), 'en');
     assert.match(await wiki.page.locator('.luxpedia-next').textContent(), /submitted version is locked/);
     assert.match(await wiki.page.locator('.luxpedia-workflow-summary dd').textContent(), /Knowledge.*Technical.*Article/);
     assert.equal(await wiki.page.locator('form:has(input[value="publish"]) input[type="submit"]').inputValue(), 'Approve and publish');
@@ -675,43 +690,33 @@ test('English is the default and the panel explains the review step', async () =
   } finally { await wiki.context.close(); }
 });
 
-test('Chinese selection persists across navigation and leaves article content intact', async () => {
+test('legacy Chinese URLs are normalized to English without changing article content', async () => {
   const wiki = await wikiFixture({ status: 'validating', linkedTarget: 'Knowledge.Technical.Article', role: 'reviewer' });
   try {
-    await wiki.page.goto(wiki.origin + '/bin/view/Drafts/NewArticle/WebHome');
-    const before = await wiki.page.locator('#user-content').textContent();
-    await wiki.page.selectOption('#luxpedia-language-select', 'zh');
-    await wiki.page.waitForURL(/xwikilanguage=zh/);
-    await wiki.page.waitForFunction(() => document.querySelector('.luxpedia-state')?.textContent === '待审核');
-    assert.equal(await wiki.page.locator('#user-content').textContent(), before);
-    assert.equal(await wiki.page.locator('#luxpedia-article-metadata tr[data-field="status"] td').textContent(), '待审核');
-    assert.equal(await wiki.page.locator('#luxpedia-article-metadata tr[data-field="summary"] td').textContent(), '<script>user data</script>');
-    assert.equal(await wiki.page.locator('form:has(input[value="publish"]) input[type="submit"]').inputValue(), '批准并发布');
-    await wiki.page.goto(wiki.origin + '/bin/view/Drafts/NewArticle/WebHome');
-    assert.equal(await wiki.page.locator('#luxpedia-language-select').inputValue(), 'zh');
-    await wiki.page.waitForFunction(() => document.querySelector('.luxpedia-state')?.textContent === '待审核');
-    if (process.env.WORKFLOW_SCREENSHOTS_DIR) {
-      await wiki.page.screenshot({ path: path.join(process.env.WORKFLOW_SCREENSHOTS_DIR, 'workflow-zh.png') });
-    }
-    await wiki.page.selectOption('#luxpedia-language-select', 'en');
+    await wiki.page.goto(wiki.origin + '/bin/view/Drafts/NewArticle/WebHome?xwikilanguage=zh');
     await wiki.page.waitForURL(/xwikilanguage=en/);
+    const before = await wiki.page.locator('#user-content').textContent();
     await wiki.page.waitForFunction(() => document.querySelector('.luxpedia-state')?.textContent === 'Awaiting review');
+    assert.equal(await wiki.page.locator('#user-content').textContent(), before);
+    assert.equal(await wiki.page.locator('#luxpedia-article-metadata tr[data-field="status"] td').textContent(), 'Awaiting review');
+    assert.equal(await wiki.page.locator('#luxpedia-article-metadata tr[data-field="summary"] td').textContent(), '<script>user data</script>');
+    assert.equal(await wiki.page.locator('form:has(input[value="publish"]) input[type="submit"]').inputValue(), 'Approve and publish');
+    assert.equal(await wiki.page.locator('#luxpedia-language-select').count(), 0);
+    assert.equal(await wiki.page.evaluate(() => window.LuxPediaI18n.language()), 'en');
   } finally { await wiki.context.close(); }
 });
 
-test('language switching in the editor preserves unsaved text and the selected category', async () => {
+test('English-only editor preserves unsaved text and the selected category', async () => {
   const wiki = await wikiFixture();
   try {
     await wiki.page.goto(wiki.origin + '/bin/edit/Drafts/NewArticle/WebHome');
     await wiki.page.locator('#luxpedia-category-toggle').waitFor();
     await wiki.page.fill('#xwikieditor', 'Unsaved text 未保存的正文');
     await wiki.chooseCategory('Technical');
-    const url = wiki.page.url();
-    await wiki.page.selectOption('#luxpedia-language-select', 'zh');
-    assert.equal(wiki.page.url(), url);
+    assert.equal(await wiki.page.locator('#luxpedia-language-select').count(), 0);
     assert.equal(await wiki.page.locator('#xwikieditor').inputValue(), 'Unsaved text 未保存的正文');
     assert.equal(await wiki.page.locator('#luxpedia-publish-category').inputValue(), 'Technical');
-    assert.equal(await wiki.page.locator('.realtime-action-done').textContent(), '保存草稿并预览');
+    assert.equal(await wiki.page.locator('.realtime-action-done').textContent(), 'Save draft and preview');
     await wiki.page.locator('.realtime-action-done').click();
     await wiki.page.locator('#luxpedia-submit-review').click();
     await wiki.expectPending('Knowledge.Technical.NewArticle');
@@ -742,7 +747,7 @@ test('workflow controls inherit the host theme palette', async () => {
       node => getComputedStyle(node).backgroundColor), 'rgb(22, 101, 52)');
     assert.equal(await wiki.page.locator('.luxpedia-steps [aria-current]').evaluate(
       node => getComputedStyle(node).color), 'rgb(126, 34, 206)');
-    assert.equal(await wiki.page.locator('#menuview .navbar-right > li#luxpedia-language').count(), 1);
+    assert.equal(await wiki.page.locator('#menuview .navbar-right > li#luxpedia-language').count(), 0);
     assert.equal(await wiki.page.locator('#original-menu').textContent(), 'Original menu');
   } finally { await wiki.context.close(); }
 });
@@ -758,7 +763,7 @@ test('a stale Chinese server locale is reconciled with the English default', asy
   } finally { await wiki.context.close(); }
 });
 
-test('language switching in a creation form preserves entered text', async () => {
+test('English-only creation form preserves entered text and omits the language switch', async () => {
   const wiki = await wikiFixture();
   try {
     await wiki.page.goto(wiki.origin + '/bin/create/Drafts/WebHome');
@@ -766,10 +771,10 @@ test('language switching in a creation form preserves entered text', async () =>
       const title = document.createElement('input'); title.id = 'new-page-title'; document.body.appendChild(title);
     });
     await wiki.page.fill('#new-page-title', 'My unsaved article title');
-    await wiki.page.selectOption('#luxpedia-language-select', 'zh');
+    assert.equal(await wiki.page.locator('#luxpedia-language-select').count(), 0);
     assert.equal(await wiki.page.locator('#new-page-title').inputValue(), 'My unsaved article title');
     assert.equal(new URL(wiki.page.url()).pathname, '/bin/create/Drafts/WebHome');
-    assert.equal(await wiki.page.locator('select[name="workflow"] option').textContent(), 'LuxPedia 文章发布流程');
+    assert.equal(await wiki.page.locator('select[name="workflow"] option').textContent(), 'LuxPedia publication workflow');
   } finally { await wiki.context.close(); }
 });
 

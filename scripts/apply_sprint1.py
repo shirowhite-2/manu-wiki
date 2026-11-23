@@ -33,10 +33,10 @@ TEST_USERS = [
 ]
 
 CATEGORIES = [
-    ("Technical", "技术文档", "系统架构、接口、技术规范"),
-    ("Operations", "操作手册", "日常维护、操作步骤、检查清单"),
-    ("Faults", "故障处理", "故障现象、排查步骤、恢复方法"),
-    ("Archive", "归档", "历史资料与过期文档"),
+    ("Technical", "Technical Documentation", "Technical architecture, interfaces, and specifications"),
+    ("Operations", "Operations", "Maintenance records, operating references, and checklists"),
+    ("Faults", "Troubleshooting", "Issue summaries, diagnostic references, and recovery records"),
+    ("Archive", "Archive", "Historical and superseded documentation"),
     ("BOP-ACTIVE", "BOP-ACTIVE", "BOP-ACTIVE 分类，说明待管理员补充"),
     ("BOP-PASSIVE", "BOP-PASSIVE", "BOP-PASSIVE 分类，说明待管理员补充"),
 ]
@@ -585,7 +585,7 @@ def ensure_group(wiki, key):
 
 def ensure_category(wiki, key, label, description):
     space = "Knowledge/" + key
-    content = "= " + label + " =\n\n" + description + "\n\n" + ARTICLE_TABLE.replace("__SPACE__", "Knowledge." + key)
+    content = "= " + label + " =\n\n" + description + '\n\n{{include reference="LuxPedia.Code.CategoryHomeTemplate" author="target"/}}\n'
     wiki.ensure_page(space, "WebHome", label, content)
     wiki.ensure_object_values(
         space,

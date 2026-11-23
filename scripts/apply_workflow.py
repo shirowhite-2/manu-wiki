@@ -396,6 +396,14 @@ WORKFLOW_UX_JS = r"""(function () {
     }).catch(function () { return ''; });
   }
 
+  function isCategoryLanding(reference) {
+    if (!reference) { return Promise.resolve(false); }
+    var base = restSpaces(reference.replace(/^xwiki:/, ''));
+    return getJson(base + '/objects/' + encodeURIComponent('LuxPedia.Code.CategoryClass'))
+      .then(function (data) { return (data.objectSummaries || []).length > 0; })
+      .catch(function () { return false; });
+  }
+
   function setFormValue(form, name, value) {
     var input = form.querySelector('[name="' + name + '"]');
     if (input) {

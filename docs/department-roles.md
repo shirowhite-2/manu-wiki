@@ -15,7 +15,7 @@
 
 ## 入口和操作
 
-复用 **Wiki 管理 → 内容 → 部门角色**。管理员首页 `XWiki.WebHome` 和左侧管理员导航也有入口。Mac 端口 8081 的直接地址：
+复用 **Wiki 管理 → 用户与权限 → 部门角色**，排列在原生“权限”之后、“用户资料”之前。管理员首页 `XWiki.WebHome` 和左侧管理员导航也保留入口。Mac 端口 8081 的直接地址：
 
 `http://127.0.0.1:8081/bin/admin/XWiki/XWikiPreferences?editor=globaladmin&section=LuxPediaDepartments`
 
@@ -53,7 +53,7 @@ security.authorization.settler=luxpedia-departments
 
 此 JAR 不开放 Docker 控制权限，也不引入第二套账号或登录系统。以后接若依/LDAP/AD 时，可分别映射网站角色组和部门组；身份同步本身未在本次实现。非 Docker 部署需运行 `sh extensions/workflow-policy/configure-departments.sh /实际路径/WEB-INF/xwiki.properties` 并重启；若已有其他自定义授权 Settler，必须先合并两个集成，脚本会保留现有配置并退出。
 
-## 升级（策略 13，Mac 端口 8081）
+## 升级（策略 15，Mac 端口 8081）
 
 保留原 `.env`、`.secrets`、Compose 项目名、数据库与 XWiki 数据卷，按现有流程备份后，在项目目录执行：
 
