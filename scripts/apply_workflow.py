@@ -737,10 +737,16 @@ WORKFLOW_UX_JS = r"""(function () {
   if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', boot); }
   else { boot(); }
   window.setInterval(resumePendingSubmission, 700);
-  if (document.body) {
-    new MutationObserver(translateWorkflowUI).observe(document.body, {
-      subtree: true, childList: true, characterData: true
+  var observedReference = documentReference();
+  if (document.body && (observedReference.indexOf('Drafts.') === 0 || observedReference.indexOf('Knowledge.') === 0)) {
+    var workflowObserver = new MutationObserver(function () {
+      workflowObserver.disconnect();
+      try { translateWorkflowUI(); }
+      finally {
+        workflowObserver.observe(document.body, { subtree: true, childList: true, characterData: true });
+      }
     });
+    workflowObserver.observe(document.body, { subtree: true, childList: true, characterData: true });
   }
 })();
 """
