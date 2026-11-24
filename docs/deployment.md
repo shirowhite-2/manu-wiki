@@ -6,7 +6,7 @@
 
 ## 配置与首次启动
 
-需要 Docker Engine、Compose v2、Bash、Python 3；备份还需要宿主机上的 `tar`、`sha256sum`、`mktemp`。预留磁盘空间给数据库、附件、镜像与本地备份；内存需求随扩展、附件和索引量增长。
+需要 Docker Engine、Compose v2、Bash、Python 3；备份还需要宿主机上的 `tar`、`mktemp` 和 SHA-256 工具。脚本优先使用 `sha256sum`，没有时自动使用 macOS 自带的 `shasum -a 256`；临时目录格式兼容 macOS/BSD 和 GNU，无需为备份额外安装 GNU 工具。预留磁盘空间给数据库、附件、镜像与本地备份；内存需求随扩展、附件和索引量增长。
 
 在仓库根目录执行：
 
@@ -93,6 +93,9 @@ docker compose start
 unset COMPOSE_FILE
 ./scripts/backup.sh
 
+# 已部署工作流权限组件的实例（包括 Mac 本地 8081 实例）
+COMPOSE_FILE=compose.yaml:compose.workflow-policy.yaml ./scripts/backup.sh
+
 # 当前云环境；默认输出至仓库 backups/。
 COMPOSE_FILE=compose.yaml:compose.cloud.yaml ./scripts/backup.sh
 
@@ -106,11 +109,11 @@ COMPOSE_FILE=compose.yaml:compose.cloud.yaml ./scripts/backup.sh /workspace/wiki
 
 - `database.dump`：PostgreSQL 自定义格式备份。
 - `xwiki.tar.gz`：XWiki 永久目录，保留数字 UID/GID。
-- `config.tar.gz`：`compose.yaml`、`.env`、`.secrets/`，以及存在时的云 override 与 Java 信任库。
+- `config.tar.gz`：`compose.yaml`、`.env`、`.secrets/`，以及存在时的 `compose.workflow-policy.yaml`、云 override 与 Java 信任库。打包权限组件配置不会自动选择它；备份操作仍按 `COMPOSE_FILE` 选择运行配置。
 - `images.txt`、`manifest.txt`：源镜像标签及本机镜像 ID、项目名、UTC 时间和配置文件选择。
 - `SHA256SUMS`：上述文件的 SHA-256 校验值。
 
-`*.partial` 目录表示未完成，不能用于恢复。脚本不会自动删除失败产物或过期备份；保留与清理应由负责人按已批准策略执行。`.runtime/backup.lock` 防止同仓库并行执行；异常断电后，只有确认没有备份进程时才能手动移除这个空锁目录。
+名称含 `.partial.` 的目录（以及旧版的 `*.partial`）表示未完成，不能用于恢复。脚本不会自动删除失败产物或过期备份；保留与清理应由负责人按已批准策略执行。`.runtime/backup.lock` 防止同仓库并行执行；异常断电后，只有确认没有备份进程时才能手动移除这个空锁目录。
 
 脚本打包本仓库约定的配置文件；如果新增了其他 `COMPOSE_FILE` override、外部密钥或挂载，应先扩展备份清单。归档内含数据库密码，数据库和附件可能包含业务数据。备份保留在当前云工作区仍有共同丢失风险，应另存一份到经授权的受控存储；权限位不是加密，跨主机传输及长期保存还需受控通道和加密。
 
@@ -121,6 +124,7 @@ docker compose ps
 curl -fsS --max-time 15 http://127.0.0.1:8080/bin/view/Main/ >/dev/null
 cd /absolute/path/to/one-completed-backup
 sha256sum -c SHA256SUMS
+# macOS 没有 sha256sum 时，上一行改为：shasum -a 256 -c SHA256SUMS
 tar -tzf xwiki.tar.gz >/dev/null
 tar -tzf config.tar.gz >/dev/null
 ```
@@ -129,7 +133,7 @@ tar -tzf config.tar.gz >/dev/null
 
 ## 恢复到全新项目
 
-恢复使用新的目录、项目名、端口和全新卷，不覆盖或停止原项目。必须使用同一次完整备份中的数据库和 XWiki 永久目录；保留原密钥及配置。先使用备份时相同的镜像版本恢复，确认成功后再讨论升级。
+恢复使用新的目录、项目名、端口和全新卷，不覆盖或停止原项目。必须使用同一次完整备份中的数据库和 XWiki 永久目录；保留原密钥及配置。先使用备份时相同的镜像版本恢复，确认成功后再讨论升级。`images.txt` 只记录镜像信息，不包含镜像本身；离线恢复前须另行加载与目标架构相符的数据库镜像和自定义权限组件镜像。`config.tar.gz` 不包含 Docker 构建上下文，恢复时使用已有镜像，不在恢复目录重新构建。
 
 下面示例适用于本仓库当前的两个服务和卷名。在 Bash 中执行，先替换 `backup` 和 `restore_parent`。`restore_parent` 必须是已存在、可写且适合保留恢复实例的目录。示例端口为 `127.0.0.1:18080`，与原项目的 `8080` 分离。
 
@@ -140,7 +144,11 @@ tar -tzf config.tar.gz >/dev/null
   backup=/absolute/path/to/one-completed-backup
   restore_parent=/workspace
   test -s "$backup/SHA256SUMS"
-  (cd "$backup" && sha256sum -c SHA256SUMS)
+  if command -v sha256sum >/dev/null; then
+    (cd "$backup" && sha256sum -c SHA256SUMS)
+  else
+    (cd "$backup" && shasum -a 256 -c SHA256SUMS)
+  fi
 
   restore_dir=$(mktemp -d "$restore_parent/manu-wiki-restore.XXXXXX")
   tar -xzf "$backup/config.tar.gz" -C "$restore_dir"
@@ -151,9 +159,13 @@ tar -tzf config.tar.gz >/dev/null
   export XWIKI_BIND_ADDRESS=127.0.0.1
   export XWIKI_PORT=18080
 
-  # 普通主机保留此行；当前云环境须把它替换成下一行。
-  unset COMPOSE_FILE
-  # export COMPOSE_FILE=compose.yaml:compose.cloud.yaml
+  # 按备份包含的权限组件选择镜像；云环境另行核对并追加 override。
+  export COMPOSE_FILE=compose.yaml
+  if [[ -f compose.workflow-policy.yaml ]]; then
+    export COMPOSE_FILE="$COMPOSE_FILE:compose.workflow-policy.yaml"
+  fi
+  # 仅适用于已核对代理与信任库的云环境：
+  # export COMPOSE_FILE="$COMPOSE_FILE:compose.cloud.yaml"
 
   docker compose config -q
   test -z "$(docker compose ps -aq)"
@@ -165,7 +177,7 @@ tar -tzf config.tar.gz >/dev/null
   done
 
   # 只先启动全新数据库。此时不要启动 XWiki。
-  docker compose up -d --wait --wait-timeout 120 db
+  docker compose up -d --pull never --no-build --wait --wait-timeout 120 db
   docker compose exec -T db pg_restore \
     --username=xwiki --dbname=xwiki --no-owner --exit-on-error \
     < "$backup/database.dump"
@@ -183,7 +195,7 @@ tar -tzf config.tar.gz >/dev/null
     --entrypoint tar "$postgres_image_id" \
     --numeric-owner -xzf - -C /restore < "$backup/xwiki.tar.gz"
 
-  docker compose up -d --wait --wait-timeout 600 xwiki
+  docker compose up -d --pull never --no-build --wait --wait-timeout 600 xwiki
   docker compose ps
   printf '恢复实例目录：%s\n新项目名：%s\n' "$restore_dir" "$COMPOSE_PROJECT_NAME"
 )
