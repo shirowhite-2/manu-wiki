@@ -12,6 +12,7 @@ usage() {
 要求 db 和 xwiki 均已运行，且没有其他操作者同时改配置或启动应用。
 
 普通主机：unset COMPOSE_FILE; ./scripts/backup.sh
+权限组件：COMPOSE_FILE=compose.yaml:compose.workflow-policy.yaml ./scripts/backup.sh
 当前云环境：COMPOSE_FILE=compose.yaml:compose.cloud.yaml ./scripts/backup.sh
 
 备份包含数据库、附件、配置与密钥；请按敏感数据保管。
@@ -35,12 +36,20 @@ backup_root=$(cd -- "$backup_root" && pwd -P)
 cd -- "$project_dir"
 compose=(docker compose --project-directory "$project_dir")
 
-for command_name in docker tar sha256sum mktemp; do
+for command_name in docker tar mktemp; do
   command -v "$command_name" >/dev/null || {
     printf '缺少命令：%s\n' "$command_name" >&2
     exit 1
   }
 done
+if command -v sha256sum >/dev/null; then
+  checksum=(sha256sum)
+elif command -v shasum >/dev/null; then
+  checksum=(shasum -a 256)
+else
+  printf '%s\n' '缺少 SHA-256 校验工具：需要 sha256sum 或 shasum；未停止服务。' >&2
+  exit 1
+fi
 [[ -s .env && -s .secrets/db_password ]] || {
   printf '%s\n' '缺少 .env 或数据库密码文件；未停止服务。' >&2
   exit 1
@@ -91,8 +100,10 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-backup_dir=$(mktemp -d "$backup_root/$(date -u +%Y%m%dT%H%M%SZ).XXXXXX.partial")
+# BSD/macOS mktemp requires the X placeholders at the end of the template.
+backup_dir=$(mktemp -d "$backup_root/$(date -u +%Y%m%dT%H%M%SZ).partial.XXXXXX")
 config_paths=(compose.yaml .env .secrets)
+[[ ! -f compose.workflow-policy.yaml ]] || config_paths+=(compose.workflow-policy.yaml)
 [[ ! -f compose.cloud.yaml ]] || config_paths+=(compose.cloud.yaml)
 [[ ! -f .runtime/java-cacerts ]] || config_paths+=(.runtime/java-cacerts)
 tar -czf "$backup_dir/config.tar.gz" -- "${config_paths[@]}"
@@ -113,9 +124,10 @@ docker run --rm --network none --read-only \
 
 (
   cd -- "$backup_dir"
-  sha256sum database.dump xwiki.tar.gz config.tar.gz images.txt manifest.txt > SHA256SUMS
+  "${checksum[@]}" database.dump xwiki.tar.gz config.tar.gz images.txt manifest.txt > SHA256SUMS
 )
-final_dir=${backup_dir%.partial}
+backup_name=${backup_dir##*/}
+final_dir="$backup_root/${backup_name/.partial./.}"
 [[ ! -e $final_dir ]]
 mv -- "$backup_dir" "$final_dir"
 backup_dir=$final_dir

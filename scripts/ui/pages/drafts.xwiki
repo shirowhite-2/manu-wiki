@@ -17,6 +17,14 @@
 #set($state = 'unstarted')
 #if($flow)#set($state = $flow.getValue('status'))#end
 #set($workspace = $draft.getObject('LuxPedia.Code.DraftWorkspaceClass'))
+#set($lease = false)
+#set($lease = $draft.getObject('LuxPedia.Code.EditLeaseClass'))
+#set($leaseOwner = '')
+#set($leaseExpires = '')
+#if($lease)
+#set($leaseOwner = "$!lease.getValue('owner')")
+#set($leaseExpires = "$!lease.getValue('expiresAt')")
+#end
 #set($abandoned = false)
 #if($workspace && $workspace.getValue('status') == 'abandoned')#set($abandoned = true)#end
 #set($mine = false)
@@ -33,10 +41,14 @@
 #if($state != 'published' && $state != 'archived' && $show)
 #set($visible = true)
 <tr><td>
-#if(!$abandoned && ($state == 'draft' || $state == 'unstarted') && ($isAdmin || ($mine && $workspace.getValue('shared') == '0')))
-<input type="checkbox" class="luxpedia-draft-select" aria-label="$escapetool.xml($draft.displayTitle)" data-reference="$escapetool.xml($item)" data-version="$escapetool.xml($draft.version)" />
+#if(!$abandoned && ($state == 'draft' || $state == 'unstarted') && $lease && $lease.getValue('owner') == $actor && ($isAdmin || ($mine && $workspace.getValue('shared') == '0')))
+<input type="checkbox" class="luxpedia-draft-select" aria-label="$escapetool.xml($draft.displayTitle)" data-reference="$escapetool.xml($item)" data-version="$escapetool.xml($draft.version)" data-lease-expires="$escapetool.xml($leaseExpires)" />
 #end
-</td><td><a href="$escapetool.xml($xwiki.getURL($item))">$escapetool.xml($draft.displayTitle)</a></td><td>#if($abandoned)#lp('abandonedTitle')#else#lp($state)#end</td><td>#if($flow)$escapetool.xml($!flow.getValue('target'))#else#lp('destinationPending')#end</td></tr>
+</td><td><a href="$escapetool.xml($xwiki.getURL($item))">$escapetool.xml($draft.displayTitle)</a></td><td>#if($abandoned)#lp('abandonedTitle')#else#lp($state)#end
+#if(!$abandoned && ($state == 'draft' || $state == 'unstarted'))
+<br/><small data-luxpedia-lease-owner="$escapetool.xml($leaseOwner)" data-luxpedia-lease-expires="$escapetool.xml($leaseExpires)">#lp('leaseListFree')</small>
+#end
+</td><td>#if($flow)$escapetool.xml($!flow.getValue('target'))#else#lp('destinationPending')#end</td></tr>
 #end
 #end
 #end

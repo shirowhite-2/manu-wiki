@@ -1,0 +1,59 @@
+LuxPedia 本地测试账号（来自 .secrets，请勿提交 Git）
+访问地址以当前部署为准，常见为 http://127.0.0.1:8080/ 或 http://127.0.0.1:8081/
+
+共 8 个登录账号：1 个管理员 + 7 个测试账号。
+
+1. Admin
+   用户名: Admin
+   密码: TM-xNgF0F4SuGHw_SkVVF_qubdWWyEA4
+   权限: 全局管理员（XWiki.Admin 直接授权，并属于 XWiki.LuxManagers / 管理）
+   部门: 无部门限制，可管理全部分类与部门配置
+
+2. poceditor
+   用户名: poceditor
+   密码: dIXoXhBChO_vWqPebYjd_a5R6IAzVFn_
+   权限: 编辑者（XWiki.LuxEditors）
+   部门: 未加入英文演示部门；可编辑草稿，不能直接改已发布正式文章
+
+3. pocreviewer
+   用户名: pocreviewer
+   密码: 8blW0mJhxZ5RIjn8JoOv6qWgYBQCn0Tj
+   权限: 审核人（XWiki.LuxReviewers）
+   部门: 未加入英文演示部门
+
+4. pocreader
+   用户名: pocreader
+   密码: VFxcXXQnrAIz_u57-veO4c0qTl71VymO
+   权限: 读者（XWiki.LuxReaders）
+   部门: 原有 IT 部门成员；该部门保留 BOP-ACTIVE 与 BOP-PASSIVE 两个分类范围
+
+5. demo_bop_active
+   用户名: demo_bop_active
+   密码: gJy-Pt1d3uRlbGCgTMzm-YchNPasAED8
+   权限: 编辑者（XWiki.LuxEditors）
+   部门: Demo BOP Active（分类 Knowledge.BOP-ACTIVE）
+   说明: 拥有 BOP-ACTIVE 下五篇关联工作草稿的编辑租约
+
+6. demo_bop_passive
+   用户名: demo_bop_passive
+   密码: zvYdNJtMsOowCENbiYKTb8Xq_yZ0rfRD
+   权限: 编辑者（XWiki.LuxEditors）
+   部门: Demo BOP Passive（分类 Knowledge.BOP-PASSIVE）
+   说明: 拥有 BOP-PASSIVE 下五篇关联工作草稿的编辑租约
+
+7. demo_bop_reviewer
+   用户名: demo_bop_reviewer
+   密码: wU4wOa1HTfGNGouemctX0cfvOc9LcAE3
+   权限: 审核人（XWiki.LuxReviewers）
+   部门: Demo BOP Active 与 Demo BOP Passive（两个 BOP 分类都可访问）
+
+8. demo_unassigned
+   用户名: demo_unassigned
+   密码: 7K2O5e1gfJhbo0HLbpEZy-SA9dKxWHU_
+   权限: 编辑者（XWiki.LuxEditors）
+   部门: 未分配部门；部门限制开启后只能访问公开分类（Technical、Operations、Faults 等非 BOP 分类），不能进两个 BOP 范围
+
+补充:
+- 非 BOP 分类在英文演示配置里是公开的。
+- 密码原文也在 .secrets/<用户名>_password；管理员用户名在 .secrets/admin_username。
+- .secrets/db_password 是数据库口令，不是登录账号，未列入上表。

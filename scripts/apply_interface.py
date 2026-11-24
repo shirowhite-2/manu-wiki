@@ -14,6 +14,7 @@ import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from interface_assets import MESSAGES, UI
+from apply_favorites import PAGE as FAVORITES_PAGE
 
 V = '''{{velocity}}
 #macro(lp $key)$services.localization.render("luxpedia.$key")#end
@@ -27,10 +28,20 @@ CATEGORY_LIST = (UI / 'pages/categories.xwiki').read_text()
 ARTICLE_LIST = (UI / 'pages/articles.xwiki').read_text()
 REVIEW_LIST = (UI / 'pages/review_queue.xwiki').read_text()
 ARCHIVE_LIST = (UI / 'pages/archive.xwiki').read_text()
+CATEGORY_HOME_INCLUDE = '{{include reference="LuxPedia.Code.CategoryHomeTemplate" author="target"/}}'
+LEGACY_CATEGORY_TEXT = {
+    'Technical': ('技术文档', '系统架构、接口、技术规范'),
+    'Operations': ('操作手册', '日常维护、操作步骤、检查清单'),
+    'Faults': ('故障处理', '故障现象、排查步骤、恢复方法'),
+    'Archive': ('归档', '历史资料与过期文档'),
+    'BOP-ACTIVE': ('BOP-ACTIVE', 'BOP-ACTIVE 分类，说明待管理员补充'),
+    'BOP-PASSIVE': ('BOP-PASSIVE', 'BOP-PASSIVE 分类，说明待管理员补充'),
+}
 LEGACY_REVIEW_REDIRECT = """{{velocity}}
 #set($discard = $response.sendRedirect($xwiki.getURL('LuxPedia.Workflow.ReviewQueue')))
 {{/velocity}}"""
 PAGES = {
+    ("Favorites", "WebHome"): ("myFavorites", V + "= #lp('myFavorites') =\n\n" + FAVORITES_PAGE + END),
     ("LuxPedia/Workflow", "WebHome"): ("workflowCenter", V + "= #lp('workflowCenter') =\n\n[[#lp('queue')>>LuxPedia.Workflow.ReviewQueue]]\n" + END),
     ("LuxPedia/Workflow", "ReviewQueue"): ("queue", V + "= #lp('queue') =\n\n#lp('nextReview')\n\n" + REVIEW_LIST + END),
     ("Main", "WebHome"): ("home", V + '''= #lp('home') =
@@ -49,8 +60,10 @@ PAGES = {
     ("Knowledge", "CategoryGuide"): ("categoryGuide", ""),
     ("Knowledge", "DocumentLibrary"): ("library", ""),
     ("Drafts", "WebHome"): ("drafts", ""),
-    ("LuxPedia/Help", "EditGuide"): ("editGuide", V + "= #lp('editGuide') =\n\n#lp('guideContent')\n" + END),
-    ("LuxPedia/Help", "WebHome"): ("help", V + "= #lp('help') =\n\n#lp('guideContent')\n" + END),
+    ("LuxPedia/Help", "PageBrowser"): ("pageBrowser", V + "= #lp('pageBrowser') =\n\n#lp('pageBrowserIntro')\n\n{{include reference=\"LuxPedia.Code.PageBrowser\" author=\"target\"/}}\n" + END),
+    ("LuxPedia/Help", "ContentComponents"): ("contentComponents", V + "= #lp('contentComponents') =\n\n#lp('componentGuideText')\n" + END),
+    ("LuxPedia/Help", "EditGuide"): ("editGuide", V + "= #lp('editGuide') =\n\n#lp('guideContent')\n\n[[#lp('contentComponents')>>LuxPedia.Help.ContentComponents]] · [[#lp('pageBrowser')>>LuxPedia.Help.PageBrowser]]\n" + END),
+    ("LuxPedia/Help", "WebHome"): ("help", V + "= #lp('help') =\n\n#lp('guideContent')\n\n[[#lp('contentComponents')>>LuxPedia.Help.ContentComponents]] · [[#lp('pageBrowser')>>LuxPedia.Help.PageBrowser]]\n" + END),
     ("LuxPedia/About", "WebHome"): ("about", V + "= #lp('about') =\n\n#lp('aboutContent')\n" + END),
     ("LuxPedia", "WebHome"): ("helpCenter", V + "= #lp('helpCenter') =\n\n[[#lp('workflowCenter')>>LuxPedia.Workflow.WebHome]] · [[#lp('help')>>LuxPedia.Help.WebHome]] · [[#lp('about')>>LuxPedia.About.WebHome]]\n" + END),
 }
@@ -98,6 +111,11 @@ for _space, _page in EDITABLE_PAGES:
 
 def ensure_translation(wiki, space, page, language, title, content, preserve_hashes=None, preserve_titles=None):
     path = wiki.page_path(space, page) + '/translations/' + language
+    if language != 'en':
+        status, _ = wiki.request('DELETE', path)
+        if status not in (200, 204, 404):
+            raise RuntimeError(f'Could not remove translation {language} from {space}.{page}: {status}')
+        return
     status, body = wiki.request('GET', path)
     if status == 200:
         root = ET.fromstring(body)
@@ -115,9 +133,64 @@ def ensure_translation(wiki, space, page, language, title, content, preserve_has
         raise RuntimeError(f'Could not update {space}.{page} translation {language}: {status}')
 
 
+def migrate_legacy_category_pages(wiki, module):
+    """Translate known generated category labels and list macros to English-only UI.
+
+    Linked Drafts copies can have an active editor lease and are not safe to rewrite
+    through the REST installer; administrators can remove those copies after the
+    asynchronous native-delete policy fix is deployed.
+    """
+    for key, label, description in module.CATEGORIES:
+        if key == 'Archive':
+            continue  # The archive integration has its own content-preserving migration.
+        legacy_label, legacy_description = LEGACY_CATEGORY_TEXT.get(key, ('', ''))
+        legacy_table = module.ARTICLE_TABLE.replace('__SPACE__', 'Knowledge.' + key)
+        space = 'Knowledge/' + key
+        path = wiki.page_path(space, 'WebHome')
+        status, response = wiki.request('GET', path)
+        if status == 404:
+            continue
+        if status != 200:
+            raise RuntimeError(f'Could not inspect {space}.WebHome: HTTP {status}')
+        page = ET.fromstring(response)
+        title = page.findtext('{http://www.xwiki.org}title') or key
+        content = page.findtext('{http://www.xwiki.org}content') or ''
+        updated_title = label if title == legacy_label else title
+        updated = content
+        if legacy_label:
+            updated = updated.replace('= ' + legacy_label + ' =', '= ' + label + ' =', 1)
+        if legacy_description:
+            updated = updated.replace(legacy_description, description, 1)
+        if legacy_table in content:
+            updated = updated.replace(legacy_table, CATEGORY_HOME_INCLUDE, 1)
+        if updated != content or updated_title != title:
+            hidden = (page.findtext('{http://www.xwiki.org}hidden') or '').lower() == 'true'
+            wiki.ensure_page(space, 'WebHome', updated_title, updated, hidden=hidden, update=True)
+
+        class_name = 'LuxPedia.Code.CategoryClass'
+        if wiki.has_object(space, 'WebHome', class_name):
+            for number in wiki.objects(space, 'WebHome', class_name):
+                values = wiki.object_values(space, 'WebHome', class_name, number)
+                changes = {}
+                if values.get('name') == legacy_label and label != legacy_label:
+                    changes['name'] = label
+                if values.get('description') == legacy_description and description != legacy_description:
+                    changes['description'] = description
+                if changes:
+                    wiki.ensure_object_values(space, 'WebHome', class_name, changes)
+
+        translation_path = path + '/translations/zh'
+        translation_status, translation_response = wiki.request('GET', translation_path)
+        if translation_status == 404:
+            continue
+        if translation_status != 200:
+            raise RuntimeError(f'Could not inspect {space}.WebHome translation zh: {translation_status}')
+        ensure_translation(wiki, space, 'WebHome', 'zh', '', '')
+
+
 def apply(module, wiki):
     wiki.ensure_object_values('XWiki', 'XWikiPreferences', 'XWiki.XWikiPreferences', {
-        'default_language': 'en', 'multilingual': '1', 'languages': 'en,zh'})
+        'default_language': 'en', 'multilingual': '0', 'languages': 'en'})
     def translations(language):
         return '\n'.join('luxpedia.' + key + '=' + value.replace('\\', '\\\\').replace('\n', '\\n')
                          for key, value in MESSAGES[language].items()) + '\n' + (UI / f'fields_{language}.properties').read_text()
@@ -148,7 +221,7 @@ def apply(module, wiki):
         if changes:
             wiki.ensure_object_values('XWiki', 'XWikiPreferences', 'XWiki.XWikiPreferences', changes)
         break
-    for renderer, content in [('CategoryList', V + CATEGORY_LIST + END), ('ArticleList', V + ARTICLE_LIST + END),
+    for renderer, content in [('PageBrowser', V + (UI / 'pages/page_browser.xwiki').read_text() + END), ('CategoryList', V + CATEGORY_LIST + END), ('ArticleList', V + ARTICLE_LIST + END),
                               ('DraftList', V + (UI / 'pages/drafts.xwiki').read_text() + END), ('DraftTools', DRAFT_TOOLS),
                               ('ArchiveList', V + ARCHIVE_LIST + END)]:
         wiki.ensure_page('LuxPedia/Code', renderer, renderer, content, hidden=True, update=True)
@@ -200,6 +273,7 @@ def apply(module, wiki):
     category_context = "#set($categoryRef = $doc.fullName)\n#set($flow = $doc.getObject('PublicationWorkflow.PublicationWorkflowClass'))\n#if($categoryRef.startsWith('Drafts.') && $flow)#set($categoryRef = $flow.getValue('target'))#end\n#set($catSpace = $categoryRef.replace('.WebHome', ''))\n"
     category_template = V + category_context + '#if($catSpace == \'Knowledge.Archive\')\n{{include reference="LuxPedia.Code.ArchiveList" author="target"/}}\n#else\n' + category_template[len(V):] + '\n#end' + END
     wiki.ensure_page('LuxPedia/Code', 'CategoryHomeTemplate', 'Category article list', category_template, hidden=True, update=True)
+    migrate_legacy_category_pages(wiki, module)
     from archive_interface import apply as apply_archive
     apply_archive(module, wiki, ensure_translation)
     # Directory page bodies use server localization; localize native page titles too.
@@ -250,6 +324,8 @@ def apply(module, wiki):
         'template': 'LuxPedia.Templates.Article', 'action': 'edit', 'terminal': '0',
         'visibilityRestrictions': 'Drafts', 'creationRestrictions': 'Drafts',
         'creationRestrictionsAreSuggestions': '0'})
+    from apply_template_center import apply as apply_template_center
+    apply_template_center(module, wiki)
     # These menu extensions render on every page and use XWiki's selected locale.
     for page, old, key, name, order in [
             ('SourceEditUIX', '源码编辑', 'sourceEdit', 'luxpedia.source.edit', 15000),
@@ -267,7 +343,7 @@ def apply(module, wiki):
             properties.update({'extensionPointId': 'org.xwiki.plaftorm.menu.content',
                                'name': name, 'scope': 'wiki', 'parameters': f'order={order}'})
         wiki.ensure_object_values('LuxPedia/Code', page, 'XWiki.UIExtensionClass', properties)
-    module.log('English and Chinese interface pages installed; article content and category names preserved')
+    module.log('English-only interface installed; English page content and category names preserved')
 
 
 def main():

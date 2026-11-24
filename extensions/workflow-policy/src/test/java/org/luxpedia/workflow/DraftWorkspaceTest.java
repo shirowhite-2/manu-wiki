@@ -37,7 +37,10 @@ class DraftWorkspaceTest {
             .when(object).set(anyString(), anyString(), any(XWikiContext.class));
         return object;
     }
+    DraftWriteBoundary.Scope boundary;
+    @org.junit.jupiter.api.AfterEach void endBoundary() { boundary.close(); }
     @BeforeEach void setup() throws Exception {
+        boundary = DraftWriteBoundary.open();
         policy = new WorkflowPolicyListenerTest.Subject();
         policy.resolver = new WorkflowPolicyListenerTest().realResolver();
         policy.authorization = mock(AuthorizationManager.class);
@@ -59,6 +62,9 @@ class DraftWorkspaceTest {
         }
         when(original.getObject(DraftWorkspace.CLASS)).thenReturn(workspace);
         when(draft.getObject(DraftWorkspace.CLASS)).thenReturn(nextWorkspace);
+        var lease = object(Map.of("owner", user.toString(), "generation", "lease-fixture", "expiresAt", Long.toString(System.currentTimeMillis() + EditLease.DURATION)));
+        when(original.getObject(EditLease.CLASS)).thenReturn(lease);
+        when(request.getHeader("X-LuxPedia-Edit-Lease")).thenReturn("lease-fixture");
         when(original.getVersion()).thenReturn("4.2"); when(original.clone()).thenReturn(draft);
         when(original.getContentAuthorReference()).thenReturn(user);
         when(wiki.getDocument(reference, context)).thenReturn(original);

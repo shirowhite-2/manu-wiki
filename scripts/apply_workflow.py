@@ -63,14 +63,18 @@ WORKFLOW_UX_JS = r"""(function () {
   var busy = false;
   var t = window.LuxPediaI18n.t;
   var uiRoles = null;
+  var categoryFields = new WeakMap();
 
   /* LUXPEDIA_WORKFLOW_PANEL */
+  /* LUXPEDIA_EDIT_LOCK */
   /* LUXPEDIA_DRAFT_ACTIONS */
+  /* LUXPEDIA_CATEGORY_PICKER */
   /* LUXPEDIA_DRAFT_WORKSPACE */
 
   function documentReference() {
     var meta = document.querySelector('meta[name="document"]');
-    return meta ? meta.content : '';
+    var native = document.documentElement.getAttribute('data-xwiki-reference') || '';
+    return meta && meta.content || native.replace(/^xwiki:/, '');
   }
 
   function currentUser() {
@@ -148,15 +152,20 @@ WORKFLOW_UX_JS = r"""(function () {
       .then(function (response) { return response.ok ? response.text() : ''; })
       .then(function (html) {
         var parsed = new DOMParser().parseFromString(html, 'text/html');
-        var links = Array.from(parsed.querySelectorAll('a[href]'));
+        var list = parsed.querySelector('.luxpedia-system-list');
+        var links = Array.from((list || parsed).querySelectorAll('a[href]'));
         var result = [];
         for (var i = 0; i < links.length; i++) {
           var link = links[i];
           var label = link.textContent.trim();
-          var path = new URL(link.getAttribute('href'), location.origin).pathname;
-          var match = path.match(/^\/bin\/view\/Knowledge\/([^/]+)\/(?:WebHome)?$/);
-          if (match && label && !result.some(function (entry) { return entry.key === decodeURIComponent(match[1]); })) {
-            result.push({ key: decodeURIComponent(match[1]), label: label });
+          var url = new URL(link.getAttribute('href'), location.origin);
+          var match = url.pathname.match(/^\/bin\/view\/Knowledge\/(.+?)\/(?:WebHome)?$/);
+          if (url.origin !== location.origin || !match || !label) { continue; }
+          var parts = match[1].split('/').map(decodeURIComponent);
+          if (parts.some(function (part) { return !part || /[.:\\/]/.test(part); })) { continue; }
+          var key = parts.join('.');
+          if (!result.some(function (entry) { return entry.key === key; })) {
+            result.push({ key: key, label: label });
           }
         }
         return result;
@@ -166,9 +175,102 @@ WORKFLOW_UX_JS = r"""(function () {
   function categorySpace(label) {
     if (!label) { return Promise.resolve(''); }
     return categoryOptions().then(function (options) {
-      var selected = options.find(function (entry) { return entry.label === label; });
+      var selected = matchCategoryOption(label, '', options);
       return selected ? selected.key : '';
     });
+  }
+
+  function localCategoryValue(value) {
+    var local = value || '';
+    if (local.indexOf(':') >= 0) {
+      var wiki = window.XWiki && (XWiki.currentWiki || XWiki.Document && XWiki.Document.currentWiki) || 'xwiki';
+      if (!local.startsWith(wiki + ':')) { return null; }
+      local = local.slice(wiki.length + 1);
+    }
+    return local;
+  }
+
+  function matchCategoryOption(value, label, options) {
+    var exact = options.find(function (entry) { return entry.key === value || entry.label === value; });
+    if (exact) { return exact; }
+    var local = localCategoryValue(value);
+    if (local === null) { return null; }
+    return options.find(function (entry) {
+      return entry.key === local || entry.label === local || 'Knowledge.' + entry.key === local ||
+        'Knowledge.' + entry.key + '.WebHome' === local;
+    }) || (!/^(?:Knowledge\.|[A-Za-z]+:)/.test(value || '') && options.find(function (entry) { return entry.label === label; }));
+  }
+
+  function isRootCategory(value) {
+    return ['', '__root__', 'Knowledge', 'Knowledge.WebHome'].includes(localCategoryValue(value));
+  }
+
+  function nativeCategoryField() {
+    var selectors = ['select[name$="_primaryCategory"]', 'select[id$="_primaryCategory"]',
+      'select[name="primaryCategory"]', 'select[data-field="primaryCategory"]', 'select[name="category"]'];
+    for (var selector of selectors) {
+      var field = Array.from(document.querySelectorAll(selector)).find(function (node) {
+        return node.id !== 'luxpedia-publish-category' && !node.multiple;
+      });
+      if (field) { return field; }
+    }
+    for (var label of document.querySelectorAll('label[for]')) {
+      if (!/^(?:primary category|category|主分类|分类)$/i.test(label.textContent.trim().replace(/[\s:：*]+$/, ''))) { continue; }
+      var field = document.getElementById(label.htmlFor);
+      if (field && field.tagName === 'SELECT' && !field.multiple && field.id !== 'luxpedia-publish-category') { return field; }
+    }
+    return null;
+  }
+
+  function reuseNativeCategoryField(options) {
+    var native = nativeCategoryField();
+    if (!native || !native.options.length) { return false; }
+    if (categoryFields.has(native)) { installCategoryTree(native, categoryFields.get(native)); return true; }
+    var fallback = document.getElementById('luxpedia-publish-category');
+    options = options || fallback && categoryFields.get(fallback);
+    if (!options) { return false; }
+    if (fallback && fallback.dataset.userChanged) {
+      var match = Array.from(native.options).find(function (option) {
+        var entry = matchCategoryOption(option.value, option.textContent.trim(), options);
+        return entry ? entry.key === fallback.value : fallback.value === '__root__' && isRootCategory(option.value);
+      });
+      if (!match) { return false; }
+      native.value = match.value;
+      native.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    categoryFields.set(native, options);
+    native.setAttribute('data-luxpedia-publication-category', 'true');
+    if (fallback) { document.getElementById('luxpedia-category-choice').remove(); }
+    installCategoryTree(native, options);
+    return true;
+  }
+
+  function selectedCategory() {
+    var native = document.querySelector('select[data-luxpedia-publication-category]');
+    var field = native || document.getElementById('luxpedia-publish-category');
+    if (!field) { return null; }
+    if (field.dataset.categoryTreeUnavailable) { return { invalid: true }; }
+    var option = field.options[field.selectedIndex];
+    if (!native) { return { key: field.value, label: option && option.dataset.label || '' }; }
+    if (!option) { return { invalid: true }; }
+    var value = field.value;
+    var entry = matchCategoryOption(value, option && option.textContent.trim(), categoryFields.get(field) || []);
+    var root = isRootCategory(value);
+    if (!entry && !root) { return { invalid: true }; }
+    var result = { key: entry ? entry.key : '__root__', label: entry ? entry.label : '' };
+    // Let the native field keep its stored key/reference. Other native category fields only supply the destination.
+    if ([field.name, field.id].some(function (name) { return /(?:^|_)primaryCategory$/.test(name || ''); })) {
+      if (entry && !matchCategoryOption(value, '', categoryFields.get(field) || [])) { return { invalid: true }; }
+      result.propertyValue = value;
+    }
+    return result;
+  }
+
+  function saveChosenCategory(reference, chosen) {
+    if (!chosen) { return Promise.resolve(true); }
+    if (chosen.invalid) { return Promise.resolve(false); }
+    var value = chosen.propertyValue !== undefined ? chosen.propertyValue : chosen.label || '';
+    return persistPrimaryCategory(reference, value);
   }
 
   function defaultTarget(reference, selectedKey) {
@@ -180,6 +282,7 @@ WORKFLOW_UX_JS = r"""(function () {
       });
     }
     return primaryCategory(reference).then(function (category) {
+      if (category && isRootCategory(category)) { return { parent: 'Knowledge', name: info.name }; }
       return categorySpace(category).then(function (categoryKey) {
         var parentParts = ['Knowledge'];
         if (categoryKey) {
@@ -293,6 +396,14 @@ WORKFLOW_UX_JS = r"""(function () {
     }).catch(function () { return ''; });
   }
 
+  function isCategoryLanding(reference) {
+    if (!reference) { return Promise.resolve(false); }
+    var base = restSpaces(reference.replace(/^xwiki:/, ''));
+    return getJson(base + '/objects/' + encodeURIComponent('LuxPedia.Code.CategoryClass'))
+      .then(function (data) { return (data.objectSummaries || []).length > 0; })
+      .catch(function () { return false; });
+  }
+
   function setFormValue(form, name, value) {
     var input = form.querySelector('[name="' + name + '"]');
     if (input) {
@@ -317,6 +428,7 @@ WORKFLOW_UX_JS = r"""(function () {
 
   function workflowFormSubmit(form) {
     if (!form) { return false; }
+    stampLeaseForm(form);
     var submit = form.querySelector('input[type="submit"],button[type="submit"]');
     if (!submit) { return false; }
     submit.click();
@@ -351,6 +463,13 @@ WORKFLOW_UX_JS = r"""(function () {
   }
 
   function continuePendingSubmission(reference) {
+    if (reference.startsWith('Drafts.') && reference !== 'Drafts.WebHome' && !leaseCanWrite()) {
+      if (leaseSnapshot) {
+        sessionStorage.removeItem(PREFIX + reference);
+        if (leaseSnapshot.status === 'locked') { sessionStorage.removeItem(PREFIX + reference + '.category'); }
+      }
+      return Promise.resolve();
+    }
     var key = PREFIX + reference;
     if (sessionStorage.getItem(key) !== '1' || busy || !uiRoles || (!uiRoles.editor && !uiRoles.admin)) { return; }
     var params = new URLSearchParams(location.search);
@@ -364,11 +483,11 @@ WORKFLOW_UX_JS = r"""(function () {
     workflowObjectExists(reference).then(function (exists) {
       if (!exists) {
         var chosen = readChosenCategory(reference);
-        var persist = chosen ? persistPrimaryCategory(reference, chosen.label || '') : Promise.resolve(true);
+        var persist = saveChosenCategory(reference, chosen);
         return persist.then(function (saved) {
           if (!saved) {
             sessionStorage.removeItem(key);
-            sessionStorage.removeItem(key + '.category');
+            if (!chosen || !chosen.invalid) { sessionStorage.removeItem(key + '.category'); }
             window.alert(t('categorySaveFailed'));
             return 'done';
           }
@@ -423,14 +542,8 @@ WORKFLOW_UX_JS = r"""(function () {
     done.addEventListener('click', function () {
       sessionStorage.removeItem(PREFIX + reference);
       sessionStorage.setItem(PREVIEW_PREFIX + reference, '1');
-      var category = document.querySelector('#luxpedia-publish-category');
-      if (category) {
-        var option = category.options[category.selectedIndex];
-        sessionStorage.setItem(PREFIX + reference + '.category', JSON.stringify({
-          key: category.value,
-          label: option && option.dataset.label || ''
-        }));
-      }
+      var category = selectedCategory();
+      if (category) { sessionStorage.setItem(PREFIX + reference + '.category', JSON.stringify(category)); }
     }, true);
     return true;
   }
@@ -440,16 +553,63 @@ WORKFLOW_UX_JS = r"""(function () {
     setTimeout(function () { waitForDoneButton(reference, isAdmin, attempts + 1); }, 500);
   }
 
+  function categoryKey(value) {
+    return (value || '').replace(/^xwiki:/, '').replace(/^document:/, '').replace(/^[^:]+:/, '')
+      .replace(/\.WebHome$/, '').replace(/^Knowledge\./, '');
+  }
+
+  function restrictPublicationLocation(attempts) {
+    if (attempts >= 20) { return; }
+    var input = document.querySelector('form[action*="PublicationWorkflow/Script"] input[name="targetSpace"]');
+    if (!input) { setTimeout(function () { restrictPublicationLocation(attempts + 1); }, 300); return; }
+    if (input.dataset.luxpediaVisibleCategories === '1') { return; }
+    input.dataset.luxpediaVisibleCategories = '1';
+    categoryOptions().then(function (options) {
+      var keys = (Array.isArray(options) ? options : []).map(function (entry) { return entry.key; });
+      function allowed(value) {
+        var key = categoryKey(value);
+        return !!key && keys.indexOf(key) !== -1;
+      }
+      var picker = input.closest('.location-picker') || input.form;
+      var tree = picker && picker.querySelector('[data-url*="DocumentTree"]');
+      if (tree && tree.getAttribute('data-url').indexOf('root=') === -1) {
+        tree.setAttribute('data-url', tree.getAttribute('data-url') + '&root=' + encodeURIComponent('document:xwiki:Knowledge.WebHome'));
+      }
+      if (input.form) {
+        input.form.addEventListener('submit', function (event) {
+          if (allowed(input.value)) { return; }
+          event.preventDefault();
+          event.stopPropagation();
+          input.focus();
+        }, true);
+      }
+      if (!tree || typeof window.require !== 'function') { return; }
+      window.require(['jquery'], function ($) {
+        $(tree).on('load_node.jstree', function (event, data) {
+          (data.node.children || []).slice().forEach(function (id) {
+            var node = data.instance.get_node(id);
+            var key = categoryKey(node && node.id);
+            var keep = keys.some(function (item) { return item === key || item.indexOf(key + '.') === 0; });
+            if (!keep) { data.instance.delete_node(node); }
+          });
+        });
+      });
+    });
+  }
+
   function installCategorySelector(reference, isAdmin, attempts) {
     if (isAdmin || reference === 'Drafts.WebHome' || attempts >= 30 || !location.pathname.match(/^\/bin\/edit\/Drafts(?:\/|$)/) ||
-        document.getElementById('luxpedia-category-choice')) { return; }
+        document.getElementById('luxpedia-category-choice') || document.querySelector('select[data-luxpedia-publication-category]')) { return; }
     workflowObjectExists(reference).then(function (hasWorkflow) {
       var container = document.createElement('div');
       container.id = 'luxpedia-category-choice';
-      container.style.cssText = 'margin:8px 0;padding:8px 10px;background:#f5f7fa;border:1px solid #d9dee7;border-radius:4px;';
+      container.className = 'xform';
       if (hasWorkflow) {
         workflowTarget(reference).then(function (target) {
-          container.textContent = target ? t('linkedTarget') + ' ' + target : t('linkedFallback');
+          var information = document.createElement('p');
+          information.className = 'xHint';
+          information.textContent = target ? t('linkedTarget') + ' ' + target : t('linkedFallback');
+          container.appendChild(information);
           var editor = document.querySelector('#xwikieditor');
           if (editor && editor.parentNode) { editor.parentNode.insertBefore(container, editor); }
         });
@@ -457,12 +617,16 @@ WORKFLOW_UX_JS = r"""(function () {
       }
       Promise.all([categoryOptions(), primaryCategory(reference)]).then(function (values) {
         var options = Array.isArray(values[0]) ? values[0] : [];
+        if (reuseNativeCategoryField(options)) {
+          // Reuse the existing property control, including its native picker, ID, name, options and current selection.
+          return;
+        }
         var current = values[1];
         var info = publicationLocation(reference);
         var select = document.createElement('select');
         select.id = 'luxpedia-publish-category';
-        select.className = 'form-control';
-        select.style.cssText = 'display:inline-block;width:auto;min-width:14em;margin:0 8px;';
+        categoryFields.set(select, options);
+        select.addEventListener('change', function () { select.dataset.userChanged = 'true'; });
         var rootOption = document.createElement('option');
         rootOption.value = '__root__';
         rootOption.textContent = t('root');
@@ -476,9 +640,9 @@ WORKFLOW_UX_JS = r"""(function () {
           option.dataset.label = entry.label;
           select.appendChild(option);
         });
-        var selected = options.find(function (entry) { return entry.label === current; });
+        var selected = matchCategoryOption(current, '', options);
         if (selected) { select.value = selected.key; }
-        else if (info.categories.length) {
+        else if (!(current && isRootCategory(current)) && info.categories.length) {
           var nestedKey = info.categories.join('.');
           if (options.some(function (entry) { return entry.key === nestedKey; })) { select.value = nestedKey; }
         }
@@ -486,15 +650,21 @@ WORKFLOW_UX_JS = r"""(function () {
         label.htmlFor = select.id;
         label.textContent = t('chooseCategory');
         label.dataset.luxpediaI18n = 'chooseCategory';
-        var hint = document.createElement('span');
-        hint.style.cssText = 'color:#666;margin-left:6px;';
+        var hint = document.createElement('div');
+        hint.id = 'luxpedia-category-hint';
+        hint.className = 'xHint';
+        select.setAttribute('aria-describedby', hint.id);
         hint.textContent = t('categoryHint');
         hint.dataset.luxpediaI18n = 'categoryHint';
-        container.appendChild(label);
-        container.appendChild(select);
-        container.appendChild(hint);
+        // Match core XWiki fields (xform / dl / dt / dd / xHint); the site theme owns their appearance.
+        var fields = document.createElement('dl');
+        var term = document.createElement('dt'); term.appendChild(label);
+        var value = document.createElement('dd');
+        value.appendChild(hint); value.appendChild(select);
+        fields.appendChild(term); fields.appendChild(value); container.appendChild(fields);
         var editor = document.querySelector('#xwikieditor');
         if (editor && editor.parentNode) { editor.parentNode.insertBefore(container, editor); }
+        installCategoryTree(select, options);
       });
     }).catch(function () {
       setTimeout(function () { installCategorySelector(reference, isAdmin, attempts + 1); }, 500);
@@ -526,12 +696,14 @@ WORKFLOW_UX_JS = r"""(function () {
     currentRoles().then(function (roles) {
       initPending = false;
       uiRoles = roles;
+      initEditLease();
       translateWorkflowUI();
       if (!roles.editor && !roles.admin) { return; }
       initializedReference = reference;
       var isAdmin = roles.admin;
       waitForDoneButton(reference, isAdmin, 0);
       installCategorySelector(reference, isAdmin, 0);
+      if (!isAdmin) { restrictPublicationLocation(0); }
       if (location.pathname.indexOf('/bin/view/') === 0) {
         continuePendingSubmission(reference);
         // Drafts use category-derived targets; published pages start as targets,
@@ -565,17 +737,25 @@ WORKFLOW_UX_JS = r"""(function () {
   if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', boot); }
   else { boot(); }
   window.setInterval(resumePendingSubmission, 700);
-  if (document.body) {
-    new MutationObserver(translateWorkflowUI).observe(document.body, {
-      subtree: true, childList: true, characterData: true
+  var observedReference = documentReference();
+  if (document.body && (observedReference.indexOf('Drafts.') === 0 || observedReference.indexOf('Knowledge.') === 0)) {
+    var workflowObserver = new MutationObserver(function () {
+      workflowObserver.disconnect();
+      try { translateWorkflowUI(); }
+      finally {
+        workflowObserver.observe(document.body, { subtree: true, childList: true, characterData: true });
+      }
     });
+    workflowObserver.observe(document.body, { subtree: true, childList: true, characterData: true });
   }
 })();
 """
 
 WORKFLOW_UX_JS = I18N_JS + WORKFLOW_UX_JS.replace(
     '/* LUXPEDIA_WORKFLOW_PANEL */', (UI / 'workflow_panel.js').read_text()).replace(
+    '/* LUXPEDIA_EDIT_LOCK */', (UI / 'edit_lock.js').read_text()).replace(
     '/* LUXPEDIA_DRAFT_ACTIONS */', (UI / 'draft_actions.js').read_text()).replace(
+    '/* LUXPEDIA_CATEGORY_PICKER */', (UI / 'category_picker.js').read_text()).replace(
     '/* LUXPEDIA_DRAFT_WORKSPACE */', (UI / 'draft_workspace.js').read_text())
 
 WORKFLOW_UX_PROPERTIES = {
@@ -812,6 +992,16 @@ def apply(module, wiki):
     wiki.ensure_page(UX_SPACE, UX_PAGE, "Workflow UX script", "Draft preview, explicit review submission and withdrawal controls.", hidden=True)
     wiki.ensure_object_values(UX_SPACE, UX_PAGE, "XWiki.JavaScriptExtension", WORKFLOW_UX_PROPERTIES)
     apply_interface(module, wiki)
+    from apply_drawio import apply as apply_drawio
+    apply_drawio(module, wiki)
+    from apply_favorites import apply as apply_favorites
+    apply_favorites(module, wiki)
+    from apply_content_tools import apply as apply_content_tools
+    apply_content_tools(module, wiki)
+    from apply_admin_tools import apply as apply_admin_tools
+    apply_admin_tools(module, wiki)
+    from apply_department_roles import apply as apply_department_roles
+    apply_department_roles(module, wiki)
     # Update auxiliary controls to use the same persisted interface language.
     for filename in ("apply_video_insert.py", "apply_admin_upload.py"):
         spec = importlib.util.spec_from_file_location(filename[:-3], ROOT / "scripts" / filename)

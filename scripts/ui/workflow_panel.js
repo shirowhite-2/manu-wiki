@@ -2,11 +2,84 @@
   var panelRequested = false;
   var metadataSnapshot = null;
   var metadataRequested = false;
+  var templateAdminRolesRequested = false;
+  function installTemplateAdminEntries() {
+    if (!uiRoles && !templateAdminRolesRequested) {
+      templateAdminRolesRequested = true;
+      currentRoles().then(function (roles) { uiRoles = roles; installTemplateAdminEntries(); })
+        .catch(function () { /* Never expose admin shortcuts when role lookup fails. */ });
+    }
+    var entry = document.getElementById('luxpedia-template-admin');
+    if (!uiRoles || uiRoles.admin !== true) {
+      if (entry) { entry.remove(); }
+      return;
+    }
+    var navigation = document.querySelector('#menuview .navbar-right, #headerglobal .navbar-right');
+    var header = document.querySelector('#headerglobal, #header');
+    if (!entry || navigation && entry.parentNode !== navigation) {
+      if (entry) { entry.remove(); }
+      entry = document.createElement(navigation && navigation.tagName === 'UL' ? 'li' : 'div');
+      entry.id = 'luxpedia-template-admin'; entry.className = navigation ? 'dropdown' : 'dropdown form-inline text-right';
+      var toggle = document.createElement('button'); toggle.id = 'luxpedia-template-admin-toggle';
+      toggle.type = 'button'; toggle.className = 'btn btn-default btn-sm dropdown-toggle';
+      toggle.setAttribute('aria-haspopup', 'true'); toggle.setAttribute('aria-expanded', 'false');
+      toggle.setAttribute('aria-controls', 'luxpedia-template-admin-menu');
+      var toggleLabel = document.createElement('span'); toggleLabel.id = 'luxpedia-template-admin-label';
+      toggleLabel.dataset.luxpediaI18n = 'templateAdminMenu';
+      var caret = document.createElement('span'); caret.className = 'caret'; caret.setAttribute('aria-hidden', 'true');
+      toggleLabel.textContent = t('templateAdminMenu');
+      toggle.appendChild(toggleLabel); toggle.appendChild(document.createTextNode(' ')); toggle.appendChild(caret);
+      var menu = document.createElement('ul'); menu.id = 'luxpedia-template-admin-menu';
+      menu.className = 'dropdown-menu dropdown-menu-right'; menu.setAttribute('role', 'menu');
+      var create = document.createElement('a'); create.id = 'luxpedia-create-article-template';
+      create.href = '/bin/create/LuxPedia/Templates/WebHome?spaceReference=LuxPedia.Templates&parent=LuxPedia.Templates.WebHome&template=LuxPedia.Code.ArticleTemplateSeed&tocreate=terminal';
+      create.dataset.luxpediaI18n = 'createArticleTemplateNav';
+      var center = document.createElement('a'); center.id = 'luxpedia-open-template-center';
+      center.href = '/bin/view/LuxPedia/Templates/';
+      center.dataset.luxpediaI18n = 'templateCenter';
+      [create, center].forEach(function (link) {
+        link.setAttribute('role', 'menuitem');
+        var item = document.createElement('li'); item.appendChild(link); menu.appendChild(item);
+      });
+      entry.appendChild(toggle); entry.appendChild(menu);
+      toggle.addEventListener('click', function (event) {
+        event.preventDefault(); event.stopPropagation();
+        var open = entry.classList.toggle('open');
+        toggle.setAttribute('aria-expanded', String(open));
+      });
+      if (!document.documentElement.dataset.luxpediaTemplateDropdownBound) {
+        document.documentElement.dataset.luxpediaTemplateDropdownBound = '1';
+        document.addEventListener('click', function (event) {
+          var current = document.getElementById('luxpedia-template-admin');
+          if (current && !current.contains(event.target)) {
+            current.classList.remove('open');
+            var currentToggle = current.querySelector('#luxpedia-template-admin-toggle');
+            if (currentToggle) { currentToggle.setAttribute('aria-expanded', 'false'); }
+          }
+        });
+      }
+      entry.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') { entry.classList.remove('open'); toggle.setAttribute('aria-expanded', 'false'); toggle.focus(); }
+      });
+      var language = document.getElementById('luxpedia-language');
+      if (navigation) { navigation.insertBefore(entry, language && language.parentNode === navigation ? language : null); }
+      else if (header) { header.appendChild(entry); }
+      else { document.body.insertBefore(entry, document.body.firstChild); }
+    }
+    text(entry.querySelector('#luxpedia-template-admin-label'), t('templateAdminMenu'));
+    text(entry.querySelector('#luxpedia-create-article-template'), t('createArticleTemplateNav'));
+    text(entry.querySelector('#luxpedia-open-template-center'), t('templateCenter'));
+  }
   function text(node, value) {
     if (node && node.textContent !== value) { node.textContent = value; }
   }
   function translateWorkflowUI() {
+    installTemplateAdminEntries();
+    reuseNativeCategoryField();
+    refreshCategoryTree();
     bindDraftWorkspaceList();
+    renderEditLease();
+    renderLeaseList();
     var workspaceAbandoned = workspaceSnapshot && workspaceSnapshot.abandoned && documentReference().startsWith('Drafts.');
     renderArticleMetadata();
     var actions = {
@@ -48,7 +121,9 @@
         if (uiRoles && !uiRoles.admin) {
           var review = ['publish', 'validate', 'refusemoderation', 'refusevalidation'].includes(action.value);
           var write = ['start', 'getEditableDraft', 'editDraft', 'submitformoderation', 'submitforvalidation'].includes(action.value);
-          form.hidden = review ? !uiRoles.reviewer : write ? !uiRoles.editor : true;
+          var categoryLanding = panelSnapshot && panelSnapshot.categoryLanding;
+          form.hidden = review ? !uiRoles.reviewer : write ? !uiRoles.editor || categoryLanding ||
+            documentReference().startsWith('Drafts.') && !leaseCanWrite() : true;
         }
       });
       var summary = panel.querySelector('.luxpedia-workflow-summary');
@@ -63,10 +138,12 @@
       }
       if (!panelRequested) {
         panelRequested = true;
-        Promise.all([workflowStatus(documentReference()), workflowTarget(documentReference())]).then(function (values) {
-          panelSnapshot = { status: values[0] || 'unstarted', target: values[1] };
-          translateWorkflowUI();
-        });
+        var currentReference = documentReference();
+        Promise.all([workflowStatus(currentReference), workflowTarget(currentReference)]).then(function (values) {
+          return isCategoryLanding(values[1] || currentReference).then(function (categoryLanding) {
+            return { status: values[0] || 'unstarted', target: values[1], categoryLanding: categoryLanding };
+          });
+        }).then(function (snapshot) { panelSnapshot = snapshot; translateWorkflowUI(); });
       }
       var state = panelSnapshot ? panelSnapshot.status : 'unstarted';
       text(summary.querySelector('.luxpedia-state'), t(workspaceAbandoned ? 'abandonedTitle' : state));

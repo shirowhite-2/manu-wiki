@@ -116,6 +116,7 @@ final class IdentityDirectory {
             XWikiDocument original = context.getWiki().getDocument(ref, context);
             if (original.isNew()) { continue; }
             XWikiDocument doc = original.clone();
+            doc.setOriginalDocument(original);
             if (normalizeView(doc)) {
                 doc.setContentAuthorReference(original.getContentAuthorReference());
                 context.getWiki().saveDocument(doc, "Restrict account directory visibility", true, context);
